@@ -139,6 +139,8 @@ class Release:
                 fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise RuntimeError("Another smooth release is running") from None
+            # The previous holder may have committed after this process loaded its config.
+            self.state = json.loads(self.state_path.read_text()) if self.state_path.exists() else None
             yield
 
     def event(self, name, **data):
@@ -304,6 +306,11 @@ class Release:
         package.mkdir(parents=True, exist_ok=False)
         image_data = json.loads(run("docker", "image", "inspect", image))[0]
         image_id = image_data["Id"]
+        if not self.c.get("test_only"):
+            labels = image_data["Config"].get("Labels", {})
+            if (labels.get("com.milano.quotation.release") != release
+                    or not re.fullmatch(r"[0-9a-f]{40}", labels.get("com.milano.quotation.git-sha", ""))):
+                raise RuntimeError("Production candidate must carry matching release and source commit labels")
         # Extract from a never-started container. No candidate can write before the gate.
         extraction = self.c["gateway"] + "-inspect-" + release
         run("docker", "create", "--name", extraction, image_id)
@@ -331,6 +338,8 @@ class Release:
                    JAVA_TOOL_OPTIONS="-Xmx640m -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC")
         name = safe_name(self.c["gateway"] + "-web-" + release)
         env_file = package / "candidate.env"
+        if any("\n" in value or "\r" in value for value in env.values()):
+            raise RuntimeError("Multiline runtime environment requires explicit review")
         atomic(env_file, "\n".join(k + "=" + v for k, v in env.items()) + "\n")
         args = ["docker", "create", "--name", name, "--restart", "unless-stopped",
                 "--network", self.c["internal_network"], "--env-file", str(env_file),
@@ -356,16 +365,23 @@ class Release:
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline and not healthy(name):
             if not inspect(name)["State"]["Running"]:
+                run("docker", "stop", "-t", "10", name)
                 raise RuntimeError("Candidate stopped; active service is unchanged")
             time.sleep(2)
         if not healthy(name):
             run("docker", "stop", "-t", "10", name)
             raise RuntimeError("Candidate readiness timed out; active service unchanged")
-        frontend = self.state["active"]["frontend"]
-        if frontend_image:
-            frontend = self.prepare_frontend(release, frontend_image)
-        target = slot(release, name, frontend)
-        self.smoke(target)
+        try:
+            frontend = self.state["active"]["frontend"]
+            if frontend_image:
+                frontend = self.prepare_frontend(release, frontend_image)
+            target = slot(release, name, frontend)
+            self.smoke(target)
+        except BaseException:
+            # The unpromoted web instance has never received public traffic.
+            run("docker", "stop", "-t", "10", name)
+            self.event("candidate-rejected", release=release, active_unchanged=True)
+            raise
         self.state["slots"][release] = target
         self.save()
         self.event("candidate-ready", release=release, compatibility=evidence)

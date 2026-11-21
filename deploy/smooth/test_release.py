@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import tempfile
+import os
 import unittest
 from unittest.mock import patch
 import release
@@ -84,6 +85,14 @@ class ReleaseFailureTests(unittest.TestCase):
         self.assertIn("purchase-shimo-sync", config)
         self.assertIn("http://worker:8088", config)
         self.assertIn("http://new:8088", config)
+
+    @unittest.skipIf(os.name == "nt", "Linux flock integration")
+    def test_lock_reloads_state_written_since_construction(self):
+        self.manager.save()
+        newer=dict(self.manager.state,active=self.new)
+        release.atomic(self.manager.state_path,json.dumps(newer))
+        with self.manager.lock():
+            self.assertEqual(self.manager.state["active"],self.new)
 
 
 class CompatibilityTests(unittest.TestCase):
