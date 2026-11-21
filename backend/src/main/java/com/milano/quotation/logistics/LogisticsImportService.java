@@ -37,6 +37,8 @@ public class LogisticsImportService {
     private boolean reconcileEnabled;
     @org.springframework.beans.factory.annotation.Value("${app.logistics.file-cleanup-enabled:true}")
     private boolean fileCleanupEnabled;
+    @org.springframework.beans.factory.annotation.Value("${app.release.web-only:false}")
+    private boolean webOnly;
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
     private final AssetStorageService storage;
@@ -64,6 +66,7 @@ public class LogisticsImportService {
     @PreDestroy public void close(){if(ownsWorker&&worker instanceof ExecutorService service)service.shutdown();}
     @EventListener(ApplicationReadyEvent.class)
     public void resumeQueued(){
+        if(webOnly)return;
         reconcileInterrupted();
         if(!resumeOnStart)return;
         int recovered=jdbc.sql("update logistics_import_batch set status='queued',phase='queued',lease_id=null,updated_at=now() where status='processing' and updated_at<now()-interval '15 minutes'").update();
@@ -103,6 +106,8 @@ public class LogisticsImportService {
         dispatch(id);
     }
     private void dispatch(UUID id){
+        // The existing worker discovers this committed durable queue entry.
+        if(webOnly)return;
         if(!submitted.add(id))return;
         try{worker.execute(()->{try{process(id);}finally{submitted.remove(id);}});}catch(RejectedExecutionException e){submitted.remove(id);log.info("Logistics import queue is full; batch {} remains queued",id);}
     }

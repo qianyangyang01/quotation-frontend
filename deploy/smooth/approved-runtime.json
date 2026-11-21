@@ -1,0 +1,29 @@
+{
+  "worker_adapters": [
+    {
+      "path": "BOOT-INF/classes/com/milano/quotation/logistics/LogisticsImportService.class",
+      "worker_sha256": "c595e40eb8b88be73328d155c30750e86137f6635436a3668ddc4404473ae4ef",
+      "web_sha256": "f00996ddcbc6f06699e6aac049210aa353f636b0f3339a6d6ad938077acda4a0"
+    },
+    {
+      "path": "BOOT-INF/classes/com/milano/quotation/logistics/LogisticsImportService$1.class",
+      "worker_sha256": "afa8ae72b10a36506c04f1718654a78dc1ac90c20cca72e0d967450feb83c172",
+      "web_sha256": "629c9e6bbbd1b5c23ddc793bf0c3bad2484f6a493fae6de961b94de0f3af3ae5"
+    },
+    {
+      "path": "BOOT-INF/classes/com/milano/quotation/logistics/LogisticsPriceHistoryWorker.class",
+      "worker_sha256": "8970a802bd75fb84fd8945289124ecfa7d8e5bdcb9e31f86c441f9a986fd8799",
+      "web_sha256": "96e340535ddff0f614a4f10be5fd2a1878537a6245a459114fb91199e167dae1"
+    },
+    {
+      "path": "BOOT-INF/classes/com/milano/quotation/logistics/LogisticsPriceHistoryWorker$1.class",
+      "worker_sha256": "57b2e4986337628d5ba9e440f02600c32b24d81182e835416389dbf25531e884",
+      "web_sha256": "e2f0463d93ef2e6b9257398db4d7232658e606d910e2a34a159b726ea74e0a7f"
+    }
+  ],
+  "runtime_sha256": {
+    "BOOT-INF/classes/com/milano/quotation/QuotationApplication.class": "05b77737609f47451182a0239a5e88b89bb1504cad19996c401c9dcfd9949bf5",
+    "BOOT-INF/classes/com/milano/quotation/common/BackgroundSchedulingConfiguration.class": "5317ee1ddd4bc94685d5ade7c477c3519da635d7f5daf8bf240edc36b04771ad",
+    "BOOT-INF/classes/com/milano/quotation/common/WebReleaseConfiguration.class": "be980e1ea85f59ff2e29b2259bdd75897140bbf7caf3ee8cfb1e31407b2db1e4"
+  }
+}

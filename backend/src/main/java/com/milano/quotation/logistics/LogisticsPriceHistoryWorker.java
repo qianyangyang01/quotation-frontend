@@ -19,6 +19,8 @@ public class LogisticsPriceHistoryWorker {
         new ThreadPoolExecutor.AbortPolicy());
     private CompletableFuture<Void> active;
     private boolean again;
+    @org.springframework.beans.factory.annotation.Value("${app.release.web-only:false}")
+    private boolean webOnly;
 
     public LogisticsPriceHistoryWorker(LogisticsPriceHistoryService history){this.history=history;}
 
@@ -30,7 +32,7 @@ public class LogisticsPriceHistoryWorker {
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    public void warm(){refresh(false);}
+    public void warm(){if(!webOnly)refresh(false);}
 
     /** Readers join existing work; new committed publications request at most one additional pass. */
     public synchronized CompletableFuture<Void> refresh(boolean published){

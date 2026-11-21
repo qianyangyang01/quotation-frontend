@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class BootstrapAdmin implements ApplicationRunner {
     private final UserAccountRepository users; private final PasswordEncoder encoder;
     private final String account; private final String name; private final String password;
+    @Value("${app.release.web-only:false}") private boolean webOnly;
     public BootstrapAdmin(UserAccountRepository users, PasswordEncoder encoder,
                           @Value("${app.bootstrap-admin.account}") String account,
                           @Value("${app.bootstrap-admin.name}") String name,
@@ -18,6 +19,7 @@ public class BootstrapAdmin implements ApplicationRunner {
         this.users = users; this.encoder = encoder; this.account = account; this.name = name; this.password = password;
     }
     @Override @Transactional public void run(ApplicationArguments args) {
+        if(webOnly)return;
         if (users.count() > 0) return;
         if (password == null || password.isBlank()) throw new IllegalStateException("APP_BOOTSTRAP_ADMIN_PASSWORD must be set for an empty quotation database");
         users.save(UserAccount.create(UserAccountService.normalizeAccount(account), name.trim(), encoder.encode(password), "super_admin", true));

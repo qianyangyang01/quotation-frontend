@@ -9,6 +9,10 @@ deploy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository_dir="$(cd "$deploy_dir/.." && pwd)"
 source "$deploy_dir/.env"
 root="${QUOTATION_DATA_ROOT:-/srv/ahmln-data/quotation-app}"
+if [[ -f "$root/smooth-release/state.json" ]]; then
+  echo "ERROR: smooth release is installed; use its release.py prepare/switch workflow. This script would interrupt active requests and workers." >&2
+  exit 1
+fi
 release_dir="$root/releases/$release"
 release_deploy_dir="$release_dir/deploy"
 test ! -e "$release_dir" || { echo "ERROR: release already exists" >&2; exit 1; }
