@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import applicationRelease from './src/data/applicationRelease.json'
 
 export default defineConfig(({ command }) => {
   // Compatible releases retain the client protocol identity so already-open
@@ -12,7 +13,7 @@ export default defineConfig(({ command }) => {
   const buildId = command === 'build' ? compatibleBuildId || releaseBuildId : ''
 
   return {
-    define: { __APP_BUILD_ID__: JSON.stringify(buildId) },
+    define: { __APP_BUILD_ID__: JSON.stringify(buildId), __APP_RELEASE_BUILD_ID__: JSON.stringify(releaseBuildId) },
     plugins: [
       vue(),
       {
@@ -22,7 +23,7 @@ export default defineConfig(({ command }) => {
           this.emitFile({
             type: 'asset',
             fileName: 'app-version.json',
-            source: JSON.stringify({ schemaVersion: 1, buildId, releaseBuildId }),
+            source: JSON.stringify({ schemaVersion: 1, buildId, releaseBuildId, release: applicationRelease }),
           })
         },
       },

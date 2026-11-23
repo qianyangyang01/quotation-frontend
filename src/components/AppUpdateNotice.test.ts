@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AppUpdateNotice from './AppUpdateNotice.vue'
 import { appUpdate, createAppUpdateMonitor, refreshUpdatedApplication } from '@/services/appUpdate'
 import { registerQuotationUpdateRecovery, readQuotationUpdateRecovery } from '@/services/quotationUpdateRecovery'
+import { currentApplicationRelease } from '@/services/applicationRelease'
 
 vi.mock('@/services/appUpdate', async importOriginal => {
   const actual = await importOriginal<typeof import('@/services/appUpdate')>()
@@ -15,6 +16,20 @@ beforeEach(() => { Object.assign(appUpdate, createAppUpdateMonitor('current')) }
 afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('global application update notice', () => {
+  it('offers ordinary updates while preserving editing and requiring an explicit refresh confirmation', async () => {
+    Object.assign(appUpdate, createAppUpdateMonitor('current', undefined, { releaseBuildId: 'loaded', requiredEpoch: 'notice-v1' }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, buildId: 'current', releaseBuildId: 'next', release: currentApplicationRelease }))))
+    const host = document.createElement('div'); document.body.append(host)
+    const app = createApp(AppUpdateNotice); app.mount(host); unmount = () => app.unmount()
+    await appUpdate.check(); await nextTick()
+    expect(host.textContent).toContain('可以继续编辑、保存和上传')
+    expect(host.textContent).not.toContain('已暂停')
+    await expect(appUpdate.ensureCurrent()).resolves.toBeUndefined()
+    expect(refreshUpdatedApplication).not.toHaveBeenCalled()
+    host.querySelector('button')!.click(); await nextTick()
+    expect(host.textContent).toContain('尚未保存的输入将被清除')
+    expect(refreshUpdatedApplication).not.toHaveBeenCalled()
+  })
   it('refreshes only after a verified quote backup, and stays on the page on storage failure', async () => {
     const unregister = registerQuotationUpdateRecovery({ scope: () => 'notice-test', capture: async () => ({ channels: ['special'] }) })
     const host = document.createElement('div'); document.body.append(host)

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
 import PageLoadNotice from '@/components/PageLoadNotice.vue'
 import AppUpdateNotice from '@/components/AppUpdateNotice.vue'
+import ApplicationReleaseNotes from '@/components/ApplicationReleaseNotes.vue'
 import { appUpdate } from '@/services/appUpdate'
 import { authState, isAuthenticated } from '@/data/authStore'
 import { hasRequestAccountChanged } from '@/services/http'
@@ -29,6 +30,7 @@ const showTopbar = computed(() => isAuthenticated.value && !['login', 'change-pa
 
 <template>
   <AppUpdateNotice />
+  <ApplicationReleaseNotes />
   <div v-if="!authState.initialized" class="app-bootstrap" aria-live="polite">
     <header><i>M</i><span><b>米莱诺报价</b><small>MILANO PRICING ERP</small></span></header>
     <main><div class="skeleton-title"></div><div class="skeleton-card"></div><p><i></i>正在加载报价工作区…</p></main>

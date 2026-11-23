@@ -1,4 +1,5 @@
 import { reactive, readonly } from 'vue'
+import { currentApplicationRelease, parseApplicationRelease, type ApplicationRelease } from './applicationRelease'
 
 const POLL_MS = 60_000
 const CHECK_TIMEOUT_MS = 2_000
@@ -15,8 +16,8 @@ export class ClientUpdateError extends Error {
 }
 
 /** No business cache or saved quotation is changed by this monitor. */
-export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fetch = (...args) => fetch(...args)) {
-  const state = reactive({ updateRequired: false, reason: 'application' as 'application' | 'exchange-rate', checking: false, unavailable: false, activeOperations: 0 })
+export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fetch = (...args) => fetch(...args), identity = { releaseBuildId: '', requiredEpoch: '' }) {
+  const state = reactive({ updateRequired: false, updateAvailable: false, release: currentApplicationRelease as ApplicationRelease, notesOpen: false, reason: 'application' as 'application' | 'exchange-rate', checking: false, unavailable: false, activeOperations: 0 })
   let pending: Promise<void> | undefined
   let lastAttempt = 0
   let reusableUntil = 0
@@ -60,6 +61,17 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
         // Keep the warning latched across another deployment/rollback. Only a
         // full reload gives every mounted module a coherent code/data baseline.
         if (value.buildId !== buildId) requireUpdate()
+        if (identity.releaseBuildId && 'releaseBuildId' in value && typeof value.releaseBuildId === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(value.releaseBuildId)) {
+          const release = 'release' in value ? parseApplicationRelease(value.release) : undefined
+          if ('release' in value && !release) throw new Error('Invalid release notes')
+          state.updateAvailable = value.releaseBuildId !== identity.releaseBuildId
+          if (release) {
+            state.release = release
+            // The epoch persists through later optional releases, so a tab that
+            // skipped a critical release must still update. Never unlatch a gate.
+            if (state.updateAvailable && (release.requiredEpoch !== identity.requiredEpoch || release.policy === 'required')) requireUpdate()
+          }
+        }
         state.unavailable = false
         reusableUntil = Date.now() + SUCCESS_TTL_MS
       } catch {
@@ -118,10 +130,14 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
     }
   }
 
-  return { state: readonly(state), check, ensureCurrent, assertCurrent, requireUpdate, beginOperation, start }
+  function showReleaseNotes() { state.notesOpen = true }
+  function closeReleaseNotes() { state.notesOpen = false }
+  return { state: readonly(state), check, ensureCurrent, assertCurrent, requireUpdate, beginOperation, start, showReleaseNotes, closeReleaseNotes }
 }
 
-export const appUpdate = createAppUpdateMonitor(typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : '')
+export const appUpdate = createAppUpdateMonitor(typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : '', undefined, {
+  releaseBuildId: typeof __APP_RELEASE_BUILD_ID__ === 'string' ? __APP_RELEASE_BUILD_ID__ : '', requiredEpoch: currentApplicationRelease.requiredEpoch,
+})
 
 /** Keep recovery and the completion of an accepted upload possible on old tabs. */
 export function isReadOnlyRequest(path: string, method: string) {

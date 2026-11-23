@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { appUpdate, refreshUpdatedApplication } from '@/services/appUpdate'
 import { quotationRecoveryState as recovery, prepareQuotationUpdateRecovery } from '@/services/quotationUpdateRecovery'
+import { currentAuthUser, isAuthenticated } from '@/data/authStore'
+import { currentApplicationRelease } from '@/services/applicationRelease'
 const state = appUpdate.state
+const acknowledged = ref(false)
+const seenKey = computed(() => `milano.release-read:${currentAuthUser.value.account}:${currentApplicationRelease.version}`)
+watch(seenKey, key => { try { acknowledged.value = localStorage.getItem(key) === 'yes' } catch { acknowledged.value = false } }, { immediate: true })
+const intro = computed(() => isAuthenticated.value && !acknowledged.value && !state.updateAvailable && !state.updateRequired)
+function acknowledge() { acknowledged.value = true; try { localStorage.setItem(seenKey.value, 'yes') } catch { /* Keep the reminder usable without storage. */ } }
+function showNotes() { if (intro.value) acknowledge(); appUpdate.showReleaseNotes() }
 const confirmingRefresh = ref(false)
 const refreshButton = ref<HTMLButtonElement>(), cancelButton = ref<HTMLButtonElement>()
 async function beginRefresh() {
@@ -25,14 +33,15 @@ async function confirmRefresh() {
   }
   refreshUpdatedApplication(true)
 }
-watch(() => state.updateRequired, visible => { if (!visible) confirmingRefresh.value = false })
+watch(() => state.updateRequired || state.updateAvailable, visible => { if (!visible) confirmingRefresh.value = false })
 </script>
 
 <template>
-  <aside v-if="state.updateRequired" class="app-update-notice" role="alert" aria-live="polite">
+  <aside v-if="state.updateRequired || state.updateAvailable" class="app-update-notice" :class="{ optional: !state.updateRequired }" :role="state.updateRequired ? 'alert' : 'status'" aria-live="polite">
     <div>
-      <strong>{{ state.reason === 'exchange-rate' ? '财务汇率已更新，请刷新后重新报价' : '系统已更新，请刷新后继续操作' }}</strong>
-      <p>新报价、审核及资料修改已暂停。{{ recovery.available ? '刷新前会在本标签页保留报价条件、渠道和表格编辑，恢复后按最新资料核价。' : '请先保留未保存内容；刷新后重新查询，再使用新的报价结果。' }}</p>
+      <strong>{{ state.updateRequired ? state.reason === 'exchange-rate' ? '财务汇率已更新，请刷新后重新报价' : '系统已更新，请刷新后继续操作' : '新版本已上线，请保存手头工作后更新' }}</strong>
+      <p v-if="state.updateRequired">新报价、审核及资料修改已暂停。{{ recovery.available ? '刷新前会在本标签页保留报价条件、渠道和表格编辑，恢复后按最新资料核价。' : '请先保留未保存内容；刷新后重新查询，再使用新的报价结果。' }}</p>
+      <p v-else>{{ state.release.title }}。可以继续编辑、保存和上传；完成手头工作后，再更新页面。</p>
       <small v-if="state.activeOperations">正在提交或上传，请等待完成后刷新。</small>
       <small v-else>{{ recovery.available ? '临时备份仅供当前账号、当前标签页恢复；已保存的历史报价不受影响。' : '刷新会清除未保存的输入；已保存的历史报价不受影响。' }}</small>
       <p v-if="confirmingRefresh" id="app-update-refresh-confirmation">{{ recovery.available ? '确认后先保留当前报价，再刷新恢复。若备份失败会留在当前页面，不会继续刷新。' : '请确认需要的内容已经复制保留，或当前草稿已经保存。确认刷新后，尚未保存的输入将被清除。' }}</p>
@@ -44,10 +53,16 @@ watch(() => state.updateRequired, visible => { if (!visible) confirmingRefresh.v
         <button ref="cancelButton" type="button" :disabled="recovery.busy" @click="cancelRefresh">取消</button>
         <button type="button" :disabled="state.activeOperations > 0 || recovery.busy" @click="confirmRefresh">{{ recovery.busy ? '正在保留报价…' : recovery.available ? '保存当前报价内容并刷新' : '已保留内容，确认刷新' }}</button>
       </div>
+      <button type="button" @click="showNotes">查看更新内容</button>
     </div>
+  </aside>
+  <aside v-else-if="intro" class="app-update-notice release-intro" role="status">
+    <div><strong>本次更新：{{ currentApplicationRelease.title }}</strong><p>查看本次上线的功能、使用位置和注意事项；更新说明也可随时从顶部导航打开。</p></div>
+    <div class="update-actions"><button type="button" @click="showNotes">查看更新内容</button><button type="button" @click="acknowledge">知道了</button></div>
   </aside>
 </template>
 
 <style scoped>
+.release-intro{background:#f1f7fc!important;color:#365971!important;border-color:#d8e5ef!important}.optional strong:before{content:'更新提醒 · '}.update-actions{flex-wrap:wrap}
 .app-update-notice{position:sticky;top:0;z-index:10000;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 24px;border-bottom:1px solid #e8b065;background:#fff4df;color:#754000;font:14px/1.6 "Microsoft YaHei",sans-serif;box-shadow:0 2px 8px #0000000d}.app-update-notice strong{font-size:15px}.app-update-notice p{margin:3px 0}.app-update-notice small{font-size:12px}.update-actions{display:flex;flex-shrink:0;gap:10px}.update-actions button{padding:9px 14px;border:1px solid #ad6400;border-radius:7px;background:#fff;color:#754000;font:inherit;cursor:pointer}.update-actions button:disabled{opacity:.55;cursor:wait}.update-actions button:focus-visible{outline:3px solid #ad6400;outline-offset:3px}@media(max-width:1000px){.app-update-notice{align-items:flex-start;flex-direction:column;gap:12px;padding:12px 16px}.update-actions{flex-wrap:wrap}}
 </style>
