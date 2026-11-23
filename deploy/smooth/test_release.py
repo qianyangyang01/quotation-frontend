@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import os
+import re
 import unittest
 from unittest.mock import patch
 import release
@@ -85,6 +86,29 @@ class ReleaseFailureTests(unittest.TestCase):
         self.assertIn("purchase-shimo-sync", config)
         self.assertIn("http://worker:8088", config)
         self.assertIn("http://new:8088", config)
+
+    def test_import_restore_excludes_review_publish_and_upload_chunks(self):
+        base = "/api/v1/logistics/"
+        for suffix in ["imports", "channels/abc-123/imports", "providers/abc-123/imports",
+                       "rebuild/datasets/abc-123/imports", "rebuild/uploads/abc-123/complete",
+                       "rebuild/imports/abc-123/retry"]:
+            self.assertIsNotNone(re.fullmatch(release.IMPORT_PATH, base + suffix))
+        for suffix in ["imports/preview", "rebuild/imports/abc-123/publish-ready",
+                       "rebuild/imports/abc-123/publish-progress", "versions/abc-123/review",
+                       "rebuild/uploads/abc-123/files/0/chunks/0"]:
+            self.assertIsNone(re.fullmatch(release.IMPORT_PATH, base + suffix))
+        self.assertNotIn(release.IMPORT_PATH, release.configuration(self.new, "worker"))
+        self.assertIn(release.IMPORT_PATH, release.configuration(dict(self.new, imports_on_worker=True), "worker"))
+
+    def test_restore_profile_preserves_application_identity(self):
+        self.manager.state["slots"] = {"old": self.old}
+        with patch.object(self.manager, "check_identity"), patch.object(self.manager, "switch") as switch, \
+             patch("release.environment", return_value={"APP_LOGISTICS_RESUME_ON_START":"false"}):
+            self.manager.restore_imports("restore")
+        target = switch.call_args.args[0]
+        self.assertEqual(target["backend_id"], self.old["backend_id"])
+        self.assertEqual(target["frontend_id"], self.old["frontend_id"])
+        self.assertTrue(target["imports_on_worker"])
 
     @unittest.skipIf(os.name == "nt", "Linux flock integration")
     def test_lock_reloads_state_written_since_construction(self):
