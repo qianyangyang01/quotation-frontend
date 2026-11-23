@@ -14,6 +14,12 @@ const record = () => normalizeQuotationRecord({
 })!
 
 describe('saved record customer table copying', () => {
+  it('carries original customer metadata and China business date without rewriting the snapshot', () => {
+    const saved = { ...record(), customerName: '历史客户', customerGrade: 'NEW', commissionThreshold: 0.95, createdAt: '2026-10-01T17:20:00Z' }
+    const before = JSON.stringify(saved)
+    expect(quotationRecordQuoteSheetSource(saved).copyMetadata).toEqual({ salesperson: 'Alex', date: '2026-10-02', customerName: '历史客户', customerGrade: '新客户', commissionThreshold: 0.95 })
+    expect(JSON.stringify(saved)).toBe(before)
+  })
   it('passes saved missing price reasons to the editor without adding them to customer output', () => {
     const saved = record()
     const reason = '2件含包材重量1.200kg，超过上限1kg'

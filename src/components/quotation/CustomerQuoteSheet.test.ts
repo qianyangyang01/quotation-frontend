@@ -27,7 +27,7 @@ function png(firstRow = 1, lastRow = 1): QuoteSheetImage {
   return { blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow, lastRow }
 }
 function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot, recordMode = false, initialSheet?: import('@/data/customerQuoteSheet').CustomerQuoteSheet) {
-  const state = reactive({ canRemoveRows: false, removalDisabled: false, skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, initialSheet, recordMode, initialSystemQuote: undefined as CustomerPriceSnapshot | undefined, resetKey: undefined as string | undefined })
+  const state = reactive({ copyMetadata: undefined as import('@/data/quoteCopyMetadata').QuoteCopyMetadata | undefined, canRemoveRows: false, removalDisabled: false, skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, initialSheet, recordMode, initialSystemQuote: undefined as CustomerPriceSnapshot | undefined, resetKey: undefined as string | undefined })
   const host = document.createElement('div'); document.body.append(host)
   app = createApp({ render: () => h(CustomerQuoteSheet, { ...state, ref:(instance:unknown)=>{exposed=instance as typeof exposed} }) }); app.mount(host)
   return state
@@ -64,6 +64,32 @@ it('copies editable HTML directly from edited prices without preview or changing
   expect(html).not.toContain('IMPORTANT NOTES')
   expect(document.body.textContent).toContain('图文表格已复制')
   expect(exposed.capturePrices()).toEqual(before)
+})
+it('copies current customer metadata, then uses the saved business date for historical quotes', async () => {
+  const state = mount(); await settle()
+  state.copyMetadata = { customerName: '当前客户', customerGrade: 'NEW', commissionThreshold: 0.95 }
+  await settle(); await click('复制图文表格')
+  const cells = async () => {
+    const host = document.createElement('div')
+    host.innerHTML = await write.mock.lastCall![0][0].items['text/html'].text()
+    return [...host.querySelectorAll('tbody tr:first-child [data-copy-metadata]')].map(cell => cell.textContent)
+  }
+  expect(await cells()).toEqual(['Alex', expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), '当前客户', '新客户', '0.95'])
+  state.recordMode = true
+  state.copyMetadata = { salesperson: '历史报价人', date: '2026-10-01', customerName: '历史客户', customerGrade: 'S', commissionThreshold: 1 }
+  await settle(); await click('复制图文表格')
+  expect(await cells()).toEqual(['历史报价人', '2026-10-01', '历史客户', 'S级客户', '1'])
+})
+it('rejects clipboard output if the customer changes while waiting for the copy lock', async () => {
+  const state = mount(); await settle()
+  state.copyMetadata = { customerName: '原客户' }; await settle()
+  let finish!: () => Promise<void>
+  vi.stubGlobal('navigator', { clipboard: { write, writeText }, locks: { request: (_name: string, _options: unknown, callback: (lock: object) => Promise<void>) => new Promise<void>((resolve, reject) => { finish = async () => { try { await callback({}); resolve() } catch (error) { reject(error) } } }) } })
+  await click('复制图文表格')
+  state.copyMetadata = { customerName: '新客户' }; await settle()
+  await finish(); await settle()
+  expect(write).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('报价已发生变化')
 })
 it('does not copy outdated table prices while waiting for the clipboard lock', async () => {
   const state=mount();await settle()
@@ -1110,8 +1136,8 @@ it('moves an average among source rows by drag, buttons and keyboard without cha
   const rows = averageRows().map(source => ({ ...source, country: '英国' })); mount(rows); await settle(); await generateWeighted()
   const id = exposed.capturePrices().averagePlans![0]!.id
   const key = `average:${id}`
-  document.querySelector<HTMLInputElement>('[aria-label="显示尺码规则列"]')!.click(); await settle()
-  const rules = document.querySelector<HTMLTextAreaElement>('[aria-label="尺码规则说明"]')!
+  document.querySelector<HTMLInputElement>('[aria-label="显示备注列"]')!.click(); await settle()
+  const rules = document.querySelector<HTMLTextAreaElement>('[aria-label="备注说明"]')!
   rules.value = 'S / M / L'; rules.dispatchEvent(new Event('input', { bubbles: true })); await settle()
   await input(`综合报价 ${id} 数量 1`, '4.80')
   const original = exposed.capturePrices().averagePlans
@@ -1134,7 +1160,7 @@ it('moves an average among source rows by drag, buttons and keyboard without cha
   const expected = [quoteSheetRowKey(rows[2]!), key, ...rows.slice(0, 2).map(quoteSheetRowKey)]
   expect(keys()).toEqual(expected)
   expect(document.querySelector('.sheet-size-rules')!.getAttribute('rowspan')).toBe('4')
-  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="尺码规则说明"]')!.value).toBe('S / M / L')
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="备注说明"]')!.value).toBe('S / M / L')
   expect(exposed.capturePrices().averagePlans).toEqual(original)
   await exposed.copyData(); await settle()
   const copied = await write.mock.lastCall![0][0].items['text/plain'].text()
@@ -1385,16 +1411,16 @@ it('blocks row mutations during saving or calculation and never offers deletion 
 })
 
 
-it('toggles the merged Size Rules cell from SKU and keeps text and prices through hide, reorder and restore', async () => {
+it('toggles the merged Note cell from SKU and keeps text and prices through hide, reorder and restore', async () => {
   const state = mount([row('a'), row('b'), row('c')])
-  const checkbox = () => document.querySelector<HTMLInputElement>('input[aria-label="显示尺码规则列"]')!
+  const checkbox = () => document.querySelector<HTMLInputElement>('input[aria-label="显示备注列"]')!
   const toggle = async (checked: boolean) => { checkbox().checked = checked; checkbox().dispatchEvent(new Event('change', { bubbles: true })); await settle() }
   expect(checkbox().closest('th')?.dataset.group).toBe('sku')
   expect(checkbox().checked).toBe(false)
   expect(document.querySelector('.sheet-size-rules')).toBeNull()
   const original = exposed.capturePrices().rows
   await toggle(true)
-  const field = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="尺码规则说明"]')!
+  const field = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="备注说明"]')!
   expect(field.maxLength).toBe(2000)
   field.value = 'S–XXL\nManual measurement: ±1–2 cm.'; field.dispatchEvent(new Event('input', { bubbles: true })); await settle()
   expect(document.querySelector('.sheet-size-rules')?.getAttribute('rowspan')).toBe('3')
@@ -1417,7 +1443,7 @@ it('toggles the merged Size Rules cell from SKU and keeps text and prices throug
 it('restores saved notes and switch state, but starts a new product with the switch off', async () => {
   const state = mount([row()], undefined, { quantities:[1], rows:[{optionId:'one',prices:[10.8]}], sizeRules:'S / M / L', sizeRulesEnabled:false }, true)
   expect(document.querySelector('.sheet-size-rules')).toBeNull()
-  const checkbox = document.querySelector<HTMLInputElement>('input[aria-label="显示尺码规则列"]')!
+  const checkbox = document.querySelector<HTMLInputElement>('input[aria-label="显示备注列"]')!
   checkbox.checked=true;checkbox.dispatchEvent(new Event('change',{bubbles:true}));await settle()
   expect(document.querySelector<HTMLTextAreaElement>('.sheet-size-rules textarea')!.value).toBe('S / M / L')
   state.initialQuote=undefined;state.recordMode=false;state.contextKey='new-product';await settle()

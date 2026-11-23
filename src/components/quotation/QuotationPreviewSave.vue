@@ -26,6 +26,7 @@ const props = withDefaults(defineProps<{
   quoteMode?: import('@/data/quotationModes').QuotationMode
   sku: string
   skus?: string[]
+  commissionThreshold?: number | null
   customerGrade: string
   coefficient: number
   customQuantity: number
@@ -109,7 +110,7 @@ const quoteRange = computed(() => {
 
     <button v-if="batchSample" type="button" class="sample-toggle" :aria-expanded="sampleExpanded" @click="sampleExpanded = !sampleExpanded">{{ sampleExpanded ? '收起' : '展开' }}样例报价单 · {{ sku }}</button>
     <div v-show="!batchSample || sampleExpanded">
-    <CustomerQuoteSheet current-quote :initial-quote="initialQuantities ? { quantities: initialQuantities, rows: [] } : undefined" :quote-mode="quoteMode" ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
+    <CustomerQuoteSheet current-quote :copy-metadata="{ customerName, customerGrade: isWomensQuotation(quoteMode) ? '女装自动系数' : customerGrade, commissionThreshold }" :initial-quote="initialQuantities ? { quantities: initialQuantities, rows: [] } : undefined" :quote-mode="quoteMode" ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
       :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
     </div>
 

@@ -2868,7 +2868,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :quote-mode="quoteMode" :product-name="manualMode ? quotationModeLabels[quoteMode] : isBundleQuotation(quoteMode) ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
           :skus="manualMode ? [quotationModeLabels[quoteMode]] : isBundleQuotation(quoteMode) ? quoteSheetBundleSkus(bundleItems) : [p.sku]"
           :sku="manualMode ? quotationModeLabels[quoteMode] : isBundleQuotation(quoteMode) ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
-          :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
+          :customer-grade="selectedCustomerGrade" :commission-threshold="parseCommissionThreshold(commissionThreshold)" :coefficient="selectedGradeCoefficient()"
           :custom-quantity="customQuoteQuantity" :unit-label="isBundleQuotation(quoteMode) ? '套' : '件'" :exchange-rate="exchange.usd"
           :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
           :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), isBundleQuotation(quoteMode) ? 1 : Math.max(1, p.quantity)).totalUsd"

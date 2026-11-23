@@ -14,6 +14,7 @@ import {
 import { copyQuoteSheetImage, preloadQuoteSheetAssets, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { compactQuoteTable, compactTablePhotos, copyCompactQuoteTable } from '@/services/compactQuoteTable'
+import type { QuoteCopyMetadata } from '@/data/quoteCopyMetadata'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import QuoteAveragePanel from './QuoteAveragePanel.vue'
 import { applyAveragePlans, averageCountry, averageScope, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
@@ -50,6 +51,7 @@ const props = defineProps<{
   hideBackToTop?: boolean
   quantityHelp?: string
   preservePricesWhilePending?: boolean
+  copyMetadata?: QuoteCopyMetadata
   batchAverage?: boolean
 }>()
 const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => !!props.currentQuote)
@@ -460,8 +462,8 @@ onBeforeUnmount(clearCompactPreview)
 
 const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value, typeof sheet.value.sizeRules === 'string').map(group => group.key === 'sku' ? { ...group, label: sheet.value.skuLabel ?? group.label } : group))
 const textTable = computed(() => quoteSheetTextTable(sheet.value))
-const sizeRulesTextIndex = computed(() => textTable.value[0].indexOf('Size Rules'))
-const groupNames: Record<QuoteSheetColumnKey, string> = { sizeRules: '尺码规则', number: '序号', sku: 'SKU', product: '商品图片', prices: '价格整组', country: '国家', provider: '物流商', shippingTime: '运输时效', processingTime: '处理时间' }
+const sizeRulesTextIndex = computed(() => textTable.value[0].indexOf('Note'))
+const groupNames: Record<QuoteSheetColumnKey, string> = { sizeRules: '备注', number: '序号', sku: 'SKU', product: '商品图片', prices: '价格整组', country: '国家', provider: '物流商', shippingTime: '运输时效', processingTime: '处理时间' }
 function rememberColumnOrder(order: QuoteSheetColumnKey[]) {
   edits.value.columnOrder = order
   layoutSaveState.value = saveQuoteSheetColumnOrder(layoutUserId.value, order) ? 'saved' : 'failed'
@@ -711,6 +713,7 @@ async function preview() {
     if (!disposed && token === generation) rendering.value = false
   }
 }
+const compactMetadata = computed(() => ({ ...props.copyMetadata, salesperson: props.copyMetadata?.salesperson ?? props.salesperson, date: props.copyMetadata?.date ?? (props.recordMode && !props.currentQuote ? '' : edits.value.date) }))
 async function copyCompact() {
   if (disposed || copying.value || rendering.value || props.sourcePending || !sheet.value.rows.length) return
   const context = props.contextKey
@@ -722,12 +725,14 @@ async function copyCompact() {
     if (disposed || context !== props.contextKey) throw new Error('报价记录已变化，请重新复制')
     if (photoLoading.value || photoError.value) throw new Error(photoError.value || '图片尚未加载完成，请重试')
     const token = generation
+    const metadata = compactMetadata.value
+    const metadataKey = JSON.stringify(metadata)
     const guard = () => {
       assertOutputCurrent()
-      if (disposed || token !== generation || props.sourcePending) throw new Error('报价已发生变化，请重新复制最新图文')
+      if (disposed || token !== generation || props.sourcePending || metadataKey !== JSON.stringify(compactMetadata.value)) throw new Error('报价已发生变化，请重新复制最新图文')
     }
     guard()
-    const result = compactQuoteTable(sheet.value, compactTablePhotos(hasPhotos.value ? photos.value : []))
+    const result = compactQuoteTable(sheet.value, compactTablePhotos(hasPhotos.value ? photos.value : []), metadata)
     guard()
     clearCompactPreview()
     compactTablePreview.value = result.table
@@ -939,7 +944,7 @@ onBeforeUnmount(() => {
                   :aria-label="`${groupNames[group.key]}排序，左右键移动`" title="拖动排序，或聚焦后按左右方向键" :disabled="copying"
                   @dragstart="startGroupDrag(group.key, $event)" @dragend="endColumnDrag"
                   @keydown.left.prevent="moveGroupByKey(group.key, -1)" @keydown.right.prevent="moveGroupByKey(group.key, 1)">⠿ <span>{{ group.key === 'prices' ? '价格 · USD' : group.label }}</span></button>
-                <label v-if="group.key === 'sku'" class="sheet-size-rules-toggle"><input type="checkbox" :checked="edits.sizeRulesEnabled" aria-label="显示尺码规则列" :disabled="copying" @change="toggleSizeRules">尺码规则</label>
+                <label v-if="group.key === 'sku'" class="sheet-size-rules-toggle"><input type="checkbox" :checked="edits.sizeRulesEnabled" aria-label="显示备注列" :disabled="copying" @change="toggleSizeRules">备注</label>
                 <div v-if="group.key === 'country'" class="sheet-country-format" role="group" aria-label="国家显示方式">
                   <button type="button" :aria-pressed="(edits.countryFormat ?? 'name') === 'name'" :disabled="copying" @click="setCountryFormat('name')">全称</button>
                   <button type="button" :aria-pressed="edits.countryFormat === 'code'" :disabled="copying" @click="setCountryFormat('code')">二字码</button>
@@ -962,7 +967,7 @@ onBeforeUnmount(() => {
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><QuoteSheetEditableText class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'number')" @cancel="cancelCellEdit()" /></td>
               <td v-else-if="group.key === 'product' && index === 0" :rowspan="displayedEditorRows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`报价单商品图 ${photoIndex + 1}`"></div></td>
-              <td v-else-if="group.key === 'sizeRules' && index === 0" :rowspan="displayedEditorRows.length" class="sheet-size-rules"><textarea v-model="edits.sizeRules" aria-label="尺码规则说明" placeholder="填写尺码规则或备注说明，支持换行" maxlength="2000" rows="4" :disabled="copying" /><small class="sheet-size-rules-count">{{ edits.sizeRules?.length ?? 0 }} / 2000</small></td>
+              <td v-else-if="group.key === 'sizeRules' && index === 0" :rowspan="displayedEditorRows.length" class="sheet-size-rules"><textarea v-model="edits.sizeRules" aria-label="备注说明" placeholder="填写备注说明，支持换行" maxlength="2000" rows="4" :disabled="copying" /><small class="sheet-size-rules-count">{{ edits.sizeRules?.length ?? 0 }} / 2000</small></td>
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
               <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}<small v-if="group.key === 'country' && row.region" class="sheet-zone-label">{{ row.region }}</small></td>
               <td v-else-if="group.key === 'country'"><QuoteSheetEditableText class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'country')" @cancel="cancelCellEdit()" /><div v-if="row.region || row.regionTranslationRequired"><QuoteSheetEditableText class="sheet-zone-label" :value="edits.fields?.[row.key]?.region ?? row.region" :aria-label="`第 ${index + 1} 行英文分区`" placeholder="English zone" maxlength="80" :disabled="copying" @input="updateField(row.key, 'region', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'region')" @cancel="cancelCellEdit()" /></div></td>

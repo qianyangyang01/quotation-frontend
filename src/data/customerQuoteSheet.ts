@@ -40,7 +40,7 @@ export function normalizeQuoteSheetOrder(order: readonly QuoteSheetColumnKey[] =
 export function quoteSheetGroups(hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], order?: readonly QuoteSheetColumnKey[], withPhotos = false, withSizeRules = false) {
   const catalog = [
     ...quoteSheetColumns(hiddenColumns),
-    { key: 'sizeRules' as const, label: 'Size Rules', width: 260 },
+    { key: 'sizeRules' as const, label: 'Note', width: 260 },
     { key: 'product' as const, label: 'Product', width: 240 },
     { key: 'prices' as const, label: 'Quote by Quantity (USD)', width: 0 },
   ]
@@ -350,7 +350,7 @@ export function customerQuoteSheetTsv(sheet: CustomerQuoteSheet) {
 export function customerQuoteSheetHtml(sheet: CustomerQuoteSheet) {
   customerQuoteSheetTsv(sheet) // Apply the same validation as the plain-text fallback.
   const table = quoteSheetTextTable(sheet)
-  const rulesIndex = table[0].indexOf('Size Rules')
+  const rulesIndex = table[0].indexOf('Note')
   const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const text = (value: string) => escape(/^[=+@-]/.test(value.trim()) ? "'" + value : value).replace(/\r?\n/g, '<br>')
   return '<table><thead><tr>' + table[0].map(label => '<th>' + escape(label) + '</th>').join('') + '</tr></thead><tbody>' +

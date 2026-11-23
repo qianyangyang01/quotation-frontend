@@ -1,3 +1,5 @@
+import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
+import type { QuoteCopyMetadata } from '@/data/quoteCopyMetadata'
 import { normalizeQuoteSheetOrder, quoteSheetCell, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import type { QuoteLocalPhoto } from './quoteLocalPhotos'
 import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
@@ -27,7 +29,7 @@ export function compactTablePhotos(photos: readonly QuoteLocalPhoto[]): CompactP
 }
 
 /** Presentation only: use exact current/saved rows, never calculate a quote or modify snapshots. */
-export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly CompactPhoto[] = []) {
+export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly CompactPhoto[] = [], metadata: QuoteCopyMetadata = {}) {
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
   if (sheet.fobBatch || sheet.showQuantityRange) throw new Error('此图文表格适用于按数量报价的物流报价单')
@@ -35,13 +37,14 @@ export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly Co
   if (photos.some(photo => !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(photo.dataUrl))) throw new Error('商品图片格式无效')
   const catalog = {
     sku: { label: 'SKU', width: 180 }, product: { label: 'Product', width: 180 },
-    sizeRules: { label: 'Size Rules', width: 180 }, country: { label: 'Country / Zone', width: 190 },
+    sizeRules: { label: 'Note', width: 180 }, country: { label: 'Country / Zone', width: 190 },
     prices: { label: 'Quote by Quantity (USD)', width: 115 }, provider: { label: 'Logistics Provider', width: 260 },
   }
   type Group = keyof typeof catalog
   const groups = normalizeQuoteSheetOrder(sheet.columnOrder ?? ['sku','product','sizeRules','country','prices','provider'])
     .filter((key): key is Group => Object.prototype.hasOwnProperty.call(catalog, key))
   const metadataHeaders = ['报价人', '报价日期', '报价客户', '客户等级', '客户佣金']
+  const metadataValues = [metadata.salesperson ?? sheet.agent, metadata.date ?? sheet.date, metadata.customerName ?? sheet.customerName ?? '', customerGradeDisplayLabel(metadata.customerGrade ?? ''), typeof metadata.commissionThreshold === 'number' && Number.isFinite(metadata.commissionThreshold) ? String(metadata.commissionThreshold) : '']
   const metadataWidth = 120
   const widths = [...metadataHeaders.map(() => metadataWidth), ...groups.flatMap(key => key === 'prices' ? sheet.quantityLabels.map(() => catalog.prices.width) : [catalog[key].width])]
   const textRows = [[...metadataHeaders, ...groups.flatMap(key => key === 'prices' ? sheet.quantityLabels.map(label => `${label} (USD)`) : [catalog[key].label])]]
@@ -61,7 +64,7 @@ export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly Co
       const row=sheet.rows[j]!, isFirst=j===i, bg=j%2?'#fff2e9':'#ffffff'
       const prices=row.prices.map(value=>value==null?'—':value.toFixed(2))
       const value = (key: Exclude<Group, 'prices'>) => key === 'sku' ? (isFirst ? row.sku ?? '' : '') : key === 'product' ? '' : key === 'sizeRules' ? (isFirst ? sheet.sizeRules ?? '' : '') : quoteSheetCell(row, key)
-      textRows.push([...metadataHeaders.map(() => ''), ...groups.flatMap(key => key === 'prices' ? prices : [plain(value(key))])])
+      textRows.push([...metadataValues.map(plain), ...groups.flatMap(key => key === 'prices' ? prices : [plain(value(key))])])
       const cells = groups.map(key => {
         if (key === 'prices') return prices.map((price,k)=>row.prices[k]==null?cell(price,115):`<td width="115" x:num="${price}" style='${style}width:86.25pt;mso-number-format:"0.00";font-weight:bold'>${price}</td>`).join('')
         if (key === 'country' || key === 'provider') return cell(value(key), catalog[key].width)
@@ -69,13 +72,13 @@ export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly Co
         const content = key === 'product' ? photos.map(photo=>`<img src="${photo.dataUrl}" width="${photo.width}" height="${photo.height}" alt="商品图片"><br>`).join('') : escape(value(key))
         return `<td rowspan="${span}" width="180" style='${textStyle}width:135pt;background:white'>${content}</td>`
       }).join('')
-      body.push(`<tr height="${rowHeight}" style="height:${rowHeight}px;background:${bg}">${metadataHeaders.map(() => `<td data-copy-metadata="blank" width="${metadataWidth}" style='${textStyle}width:${metadataWidth*.75}pt'></td>`).join('')}${cells}</tr>`)
+      body.push(`<tr height="${rowHeight}" style="height:${rowHeight}px;background:${bg}">${metadataValues.map(value => `<td data-copy-metadata="value" width="${metadataWidth}" style='${textStyle}width:${metadataWidth*.75}pt'>${escape(value)}</td>`).join('')}${cells}</tr>`)
     }
     i=end
   }
   const groupHeaders = groups.map(key => header(catalog[key].label, key === 'prices' ? `colspan="${sheet.quantityLabels.length}"` : 'rowspan="2"', catalog[key].width * (key === 'prices' ? sheet.quantityLabels.length : 1))).join('')
-  const metadata = metadataHeaders.map(label => header(label, 'rowspan="2" data-copy-metadata="header"', metadataWidth)).join('')
-  const table=`<table border="1" cellspacing="0" cellpadding="7" style="border-collapse:collapse;table-layout:fixed;width:${widths.reduce((a,b)=>a+b,0)}px"><colgroup>${widths.map(width=>`<col width="${width}" style="mso-width-source:userset;mso-width-alt:${Math.round(width*36.57)};width:${width*.75}pt">`).join('')}</colgroup><thead><tr>${metadata}${groupHeaders}</tr><tr>${sheet.quantityLabels.map(label=>header(label,'',115)).join('')}</tr></thead><tbody>${body.join('')}</tbody></table>`
+  const metadataHeading = metadataHeaders.map(label => header(label, 'rowspan="2" data-copy-metadata="header"', metadataWidth)).join('')
+  const table=`<table border="1" cellspacing="0" cellpadding="7" style="border-collapse:collapse;table-layout:fixed;width:${widths.reduce((a,b)=>a+b,0)}px"><colgroup>${widths.map(width=>`<col width="${width}" style="mso-width-source:userset;mso-width-alt:${Math.round(width*36.57)};width:${width*.75}pt">`).join('')}</colgroup><thead><tr>${metadataHeading}${groupHeaders}</tr><tr>${sheet.quantityLabels.map(label=>header(label,'',115)).join('')}</tr></thead><tbody>${body.join('')}</tbody></table>`
   return { html:`<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><!--StartFragment-->${table}<!--EndFragment--></body></html>`, table, text:textRows.map(row=>row.join('\t')).join('\n') }
 }
 

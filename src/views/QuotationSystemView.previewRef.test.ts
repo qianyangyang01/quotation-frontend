@@ -116,9 +116,9 @@ it.each([
   await input('WhatsApp 联系方式','+183 5650 6953')
   await input('第 1 个价格列单位','set')
   await input('第 2 个价格列单位','sets')
-  const rulesToggle=document.querySelector<HTMLInputElement>('input[aria-label="显示尺码规则列"]')!
+  const rulesToggle=document.querySelector<HTMLInputElement>('input[aria-label="显示备注列"]')!
   rulesToggle.checked=true;rulesToggle.dispatchEvent(new Event('change',{bubbles:true}));await settle()
-  const rulesText=document.querySelector<HTMLTextAreaElement>('textarea[aria-label="尺码规则说明"]')!
+  const rulesText=document.querySelector<HTMLTextAreaElement>('textarea[aria-label="备注说明"]')!
   rulesText.value='S–XXL';rulesText.dispatchEvent(new Event('input',{bubbles:true}));await settle()
 
   await input('第 1 行第 2 列美元价格','2.70')

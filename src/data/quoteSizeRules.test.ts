@@ -9,9 +9,9 @@ it('copies exactly one escaped merged cell and excludes it when disabled', () =>
  const sheet=build(), html=customerQuoteSheetHtml(sheet), table=quoteSheetTextTable(sheet)
  expect(html).toContain('rowspan="2"');expect(html).toContain("'=bad&lt;script&gt;<br>S &amp; M")
  expect(html.match(/rowspan=/g)).toHaveLength(1)
- const index=table[0].indexOf('Size Rules');expect(table[1][index]).toBe(edits.sizeRules);expect(table[2][index]).toBe('')
+ const index=table[0].indexOf('Note');expect(table[1][index]).toBe(edits.sizeRules);expect(table[2][index]).toBe('')
  expect(customerQuoteSheetTsv(sheet)).toContain("'=bad<script> S & M")
- edits.sizeRulesEnabled=false;expect(customerQuoteSheetHtml(build())).not.toContain('Size Rules')
+ edits.sizeRulesEnabled=false;expect(customerQuoteSheetHtml(build())).not.toContain('Note')
 })
 it('round trips the notes and disabled switch without altering prices and enforces the length limit', () => {
  const raw={quantities:[1],rows:[{optionId:'a',prices:[2]}],sizeRules:'中'.repeat(2000),sizeRulesEnabled:false}

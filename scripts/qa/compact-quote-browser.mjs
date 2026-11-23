@@ -45,6 +45,12 @@ try {
   assert.equal(listHtml,detailHtml)
   assert.equal((listHtml.match(/data-copy-metadata="header"/g)||[]).length,5)
   for(const label of ['报价人','报价日期','报价客户','客户等级','客户佣金'])assert.ok(listHtml.includes(label))
+  assert.ok(listHtml.includes('Note'));assert.ok(!listHtml.includes('Size Rules'))
+  const metadataRows = await page.evaluate(html => {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    return [...doc.querySelectorAll('tbody tr')].map(row => [...row.querySelectorAll('[data-copy-metadata="value"]')].map(cell => cell.textContent))
+  }, listHtml)
+  for (const values of metadataRows) assert.deepEqual(values, ['本地验收','2026-11-23','本地示例，不用于业务','新客户','0.95'])
   if(process.env.QA_WPS==='1') {
     execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/qa/compact-quote-wps.ps1'],{encoding:'utf8',windowsHide:true})
     const result=JSON.parse((await readFile(`${out}/wps-result.json`,'utf8')).replace(/^\uFEFF/,''))
