@@ -1,16 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { appUpdate, refreshUpdatedApplication } from '@/services/appUpdate'
 import { quotationRecoveryState as recovery, prepareQuotationUpdateRecovery } from '@/services/quotationUpdateRecovery'
-import { currentAuthUser, isAuthenticated } from '@/data/authStore'
-import { currentApplicationRelease } from '@/services/applicationRelease'
 const state = appUpdate.state
-const acknowledged = ref(false)
-const seenKey = computed(() => `milano.release-read:${currentAuthUser.value.account}:${currentApplicationRelease.version}`)
-watch(seenKey, key => { try { acknowledged.value = localStorage.getItem(key) === 'yes' } catch { acknowledged.value = false } }, { immediate: true })
-const intro = computed(() => isAuthenticated.value && !acknowledged.value && !state.updateAvailable && !state.updateRequired)
-function acknowledge() { acknowledged.value = true; try { localStorage.setItem(seenKey.value, 'yes') } catch { /* Keep the reminder usable without storage. */ } }
-function showNotes() { if (intro.value) acknowledge(); appUpdate.showReleaseNotes() }
+function showNotes() { appUpdate.showReleaseNotes() }
 const confirmingRefresh = ref(false)
 const refreshButton = ref<HTMLButtonElement>(), cancelButton = ref<HTMLButtonElement>()
 async function beginRefresh() {
@@ -56,13 +49,9 @@ watch(() => state.updateRequired || state.updateAvailable, visible => { if (!vis
       <button type="button" @click="showNotes">查看更新内容</button>
     </div>
   </aside>
-  <aside v-else-if="intro" class="app-update-notice release-intro" role="status">
-    <div><strong>本次更新：{{ currentApplicationRelease.title }}</strong><p>查看本次上线的功能、使用位置和注意事项；更新说明也可随时从顶部导航打开。</p></div>
-    <div class="update-actions"><button type="button" @click="showNotes">查看更新内容</button><button type="button" @click="acknowledge">知道了</button></div>
-  </aside>
 </template>
 
 <style scoped>
-.release-intro{background:#f1f7fc!important;color:#365971!important;border-color:#d8e5ef!important}.optional strong:before{content:'更新提醒 · '}.update-actions{flex-wrap:wrap}
+.optional strong:before{content:'更新提醒 · '}.update-actions{flex-wrap:wrap}
 .app-update-notice{position:sticky;top:0;z-index:10000;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 24px;border-bottom:1px solid #e8b065;background:#fff4df;color:#754000;font:14px/1.6 "Microsoft YaHei",sans-serif;box-shadow:0 2px 8px #0000000d}.app-update-notice strong{font-size:15px}.app-update-notice p{margin:3px 0}.app-update-notice small{font-size:12px}.update-actions{display:flex;flex-shrink:0;gap:10px}.update-actions button{padding:9px 14px;border:1px solid #ad6400;border-radius:7px;background:#fff;color:#754000;font:inherit;cursor:pointer}.update-actions button:disabled{opacity:.55;cursor:wait}.update-actions button:focus-visible{outline:3px solid #ad6400;outline-offset:3px}@media(max-width:1000px){.app-update-notice{align-items:flex-start;flex-direction:column;gap:12px;padding:12px 16px}.update-actions{flex-wrap:wrap}}
 </style>

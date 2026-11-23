@@ -13,7 +13,7 @@ function close() { appUpdate.closeReleaseNotes() }
 
 <template>
   <dialog ref="dialog" class="release-notes" aria-labelledby="release-notes-title" @cancel="close" @close="close" @click="event => { if (event.target === dialog) close() }">
-    <header><div><span>版本更新 · {{ state.release.publishedOn }}</span><h2 id="release-notes-title">{{ state.release.title }}</h2><small>{{ state.release.version }}{{ state.updateAvailable ? ' · 更新后可使用' : ' · 当前版本' }}</small></div><button type="button" aria-label="关闭更新说明" @click="close">×</button></header>
+    <header><div><span>版本更新 · {{ state.release.publishedOn }}</span><h2 id="release-notes-title">{{ state.release.title }}</h2><small>{{ state.updateAvailable ? '更新后可使用' : '当前版本' }}</small></div><button type="button" aria-label="关闭更新说明" @click="close">×</button></header>
     <main><article v-for="feature in state.release.features" :key="feature.title"><h3>{{ feature.title }}</h3><p>{{ feature.description }}</p><small>功能位置：{{ feature.location }}</small></article></main>
     <footer><span>更新页面不会修改已保存的历史报价。</span><button type="button" @click="close">我知道了</button></footer>
   </dialog>
