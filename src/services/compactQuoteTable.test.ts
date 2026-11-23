@@ -12,7 +12,7 @@ it('copies complete saved channel names and regions by row identity after reorde
     { country: '美国', carrier: '燕文', transport: '燕文化妆品专线', rule: '计费规则', channelKey: 'yanwen', quoteRegion: '全国统一', eta: '', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 3 },
     { country: '澳大利亚', carrier: '极通环球', transport: '极通环球专线-标准定制特货', rule: '计费规则', channelKey: 'jito-2', quoteRegion: '澳大利亚2区', eta: '', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 3 },
     { country: '澳大利亚', carrier: '极通环球', transport: '极通环球专线-标准定制特货', rule: '计费规则', channelKey: 'jito-3', quoteRegion: '澳大利亚3区', eta: '', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 3 },
-  ]
+  ].map((source, index) => ({ ...source, ruleId: index + 1, channelCode: `TEST-${index}` }))
   const input = sheet()
   input.rows = sources.map((source, i) => ({ ...input.rows[1], key: quoteSheetRowKey(source), provider: i ? 'JITO' : 'Yanwen' })).reverse()
   input.rows.push({ ...input.rows[0], key: 'average:demo', averageId: 'demo', provider: '50%燕文 · 燕文化妆品专线 + 50%极通环球 · 极通环球专线-标准定制特货' })
