@@ -1,6 +1,6 @@
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
 import type { QuoteCopyMetadata } from '@/data/quoteCopyMetadata'
-import { normalizeQuoteSheetOrder, quoteSheetCell, quoteSheetProviderKey, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { normalizeQuoteSheetOrder, quoteSheetCell, quoteSheetProviderKey, quoteSheetRowKey, type CustomerQuoteSheet, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import type { QuoteLocalPhoto } from './quoteLocalPhotos'
 import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
 
@@ -22,6 +22,14 @@ const chineseProviders = new Map(Object.entries({
 }).map(([name, chinese]) => [quoteSheetProviderKey(name), chinese]))
 
 const chineseProvider = (name: string) => chineseProviders.get(quoteSheetProviderKey(name)) ?? name
+
+function channelLabel(provider: string, source?: QuoteSheetSourceRow) {
+  if (!source) return chineseProvider(provider)
+  const carrier = chineseProvider(source.carrier?.trim() || provider)
+  const channel = (source.transport || source.rule || '').trim()
+  const region = source.quoteRegion === '全国统一' ? '' : source.quoteRegion?.trim() || ''
+  return [...new Set([carrier, channel, region].filter(Boolean))].join(' · ')
+}
 /** Embed decoded, locally owned photos: no expiring URLs or asset uploads. */
 export function compactTablePhotos(photos: readonly QuoteLocalPhoto[]): CompactPhoto[] {
   return photos.map(photo => {
@@ -41,7 +49,7 @@ export function compactTablePhotos(photos: readonly QuoteLocalPhoto[]): CompactP
 }
 
 /** Presentation only: use exact current/saved rows, never calculate a quote or modify snapshots. */
-export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly CompactPhoto[] = [], metadata: QuoteCopyMetadata = {}) {
+export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly CompactPhoto[] = [], metadata: QuoteCopyMetadata = {}, sources: readonly QuoteSheetSourceRow[] = []) {
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
   if (sheet.fobBatch || sheet.showQuantityRange) throw new Error('此图文表格适用于按数量报价的物流报价单')
@@ -65,6 +73,8 @@ export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly Co
   const cell=(value:string,width=190)=>`<td width="${width}" style='${textStyle}width:${width*.75}pt'>${escape(value)}</td>`
   const header=(label:string,attrs='',width=180)=>`<th ${attrs} width="${width}" style='${style}width:${width*.75}pt;background:#f98019;color:white;font-weight:bold;height:30px'>${escape(label)}</th>`
   const body:string[]=[]
+  // Resolve by stable row identity, never by display order or the current logistics library.
+  const sourceByKey = new Map(sources.map(source => [quoteSheetRowKey(source), source]))
   for(let i=0;i<sheet.rows.length;){
     const first=sheet.rows[i]!
     let end=i+1
@@ -75,7 +85,7 @@ export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly Co
     for(let j=i;j<end;j++){
       const row=sheet.rows[j]!, isFirst=j===i, bg=j%2?'#fff2e9':'#ffffff'
       const prices=row.prices.map(value=>value==null?'—':value.toFixed(2))
-      const value = (key: Exclude<Group, 'prices'>) => key === 'sku' ? (isFirst ? row.sku ?? '' : '') : key === 'product' ? '' : key === 'sizeRules' ? (isFirst ? sheet.sizeRules ?? '' : '') : key === 'provider' ? chineseProvider(row.provider) : quoteSheetCell(row, key)
+      const value = (key: Exclude<Group, 'prices'>) => key === 'sku' ? (isFirst ? row.sku ?? '' : '') : key === 'product' ? '' : key === 'sizeRules' ? (isFirst ? sheet.sizeRules ?? '' : '') : key === 'provider' ? channelLabel(row.provider, row.averageId ? undefined : sourceByKey.get(row.key)) : quoteSheetCell(row, key)
       textRows.push([...metadataValues.map(plain), ...groups.flatMap(key => key === 'prices' ? prices : [plain(value(key))])])
       const cells = groups.map(key => {
         if (key === 'prices') return prices.map((price,k)=>row.prices[k]==null?cell(price,115):`<td width="115" x:num="${price}" style='${style}width:86.25pt;mso-number-format:"0.00";font-weight:bold'>${price}</td>`).join('')

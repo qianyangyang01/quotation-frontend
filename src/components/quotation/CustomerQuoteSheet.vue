@@ -732,7 +732,7 @@ async function copyCompact() {
       if (disposed || token !== generation || props.sourcePending || metadataKey !== JSON.stringify(compactMetadata.value)) throw new Error('报价已发生变化，请重新复制最新图文')
     }
     guard()
-    const result = compactQuoteTable(sheet.value, compactTablePhotos(hasPhotos.value ? photos.value : []), metadata)
+    const result = compactQuoteTable(sheet.value, compactTablePhotos(hasPhotos.value ? photos.value : []), metadata, props.rows)
     guard()
     clearCompactPreview()
     compactTablePreview.value = result.table

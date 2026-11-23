@@ -1,12 +1,31 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import { compactQuoteTable, copyCompactQuoteTable } from './compactQuoteTable'
-import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { quoteSheetRowKey, type CustomerQuoteSheet, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 const sheet=():CustomerQuoteSheet=>({agent:'Private agent',date:'2026-11-20',quantityLabels:['1 pc','2 pcs','3 pcs'],sizeRules:'S / M / L',issues:[],rows:[
   {key:'a',number:1,sku:'TC2602578-5\n30CM',country:'United States',provider:'50%顺丰商派 + 50%燕文',shippingTime:'7 days',prices:[37.45,72.95,108.50],sourceDescription:'Private cost'},
   {key:'b',number:2,sku:'TC2602578-5\n30CM',country:'United Kingdom',provider:'SF Express',shippingTime:'7 days',prices:[29.10,54.70,80.30],sourceDescription:'Private cost'},
 ]})
 afterEach(()=>vi.unstubAllGlobals())
+it('copies complete saved channel names and regions by row identity after reordering', () => {
+  const sources: QuoteSheetSourceRow[] = [
+    { country: '美国', carrier: '燕文', transport: '燕文化妆品专线', rule: '计费规则', channelKey: 'yanwen', quoteRegion: '全国统一', eta: '', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 3 },
+    { country: '澳大利亚', carrier: '极通环球', transport: '极通环球专线-标准定制特货', rule: '计费规则', channelKey: 'jito-2', quoteRegion: '澳大利亚2区', eta: '', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 3 },
+    { country: '澳大利亚', carrier: '极通环球', transport: '极通环球专线-标准定制特货', rule: '计费规则', channelKey: 'jito-3', quoteRegion: '澳大利亚3区', eta: '', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 3 },
+  ]
+  const input = sheet()
+  input.rows = sources.map((source, i) => ({ ...input.rows[1], key: quoteSheetRowKey(source), provider: i ? 'JITO' : 'Yanwen' })).reverse()
+  input.rows.push({ ...input.rows[0], key: 'average:demo', averageId: 'demo', provider: '50%燕文 · 燕文化妆品专线 + 50%极通环球 · 极通环球专线-标准定制特货' })
+  const before = JSON.stringify({ input, sources })
+  const result = compactQuoteTable(input, [], {}, sources)
+  const host = document.createElement('div'); host.innerHTML = result.table
+  const expected = ['极通环球 · 极通环球专线-标准定制特货 · 澳大利亚3区', '极通环球 · 极通环球专线-标准定制特货 · 澳大利亚2区', '燕文 · 燕文化妆品专线', input.rows[3].provider]
+  expect([...host.querySelectorAll('tbody tr')].map(row => row.lastElementChild!.textContent)).toEqual(expected)
+  expect(result.text.split('\n').slice(1).map(row => row.split('\t').at(-1))).toEqual(expected)
+  expect(result.text).not.toContain('计费规则')
+  expect(result.text).not.toContain('全国统一')
+  expect(JSON.stringify({ input, sources })).toBe(before)
+})
 it('copies provider names in Chinese in both formats without changing the saved sheet', () => {
   const input = sheet()
   const names = ['Rongding', 'SFYD Express', 'JITO', 'YunExpress', ' sfyd express ', '容鼎', '50%顺丰商派 + 50%燕文', 'Rongding 专线', 'Custom Provider']

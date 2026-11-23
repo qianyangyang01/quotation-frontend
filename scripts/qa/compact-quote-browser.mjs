@@ -27,6 +27,7 @@ try {
     return [...doc.querySelectorAll('tbody tr')].map(row=>row.lastElementChild.textContent)
   },listHtml)
   assert.ok(copiedProviders.includes('顺丰'))
+  assert.ok(copiedProviders.includes('顺丰 · 顺丰商派'))
   assert.ok(copiedProviders.includes('燕文'))
   assert.ok(copiedProviders.includes('云途'))
   assert.ok(copiedProviders.includes('50%顺丰商派 + 50%燕文'))
