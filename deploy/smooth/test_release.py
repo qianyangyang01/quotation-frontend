@@ -34,6 +34,45 @@ class ReleaseFailureTests(unittest.TestCase):
             command.assert_not_called()
         self.assertEqual(self.manager.state["active"], self.old)
 
+    def retirement_fixture(self):
+        self.manager.state.update(active=self.new, slots={
+            "old": self.old, "routing-only": dict(self.old, release="routing-only"), "new": self.new})
+
+    def test_retire_drained_container_shared_only_by_historical_aliases(self):
+        self.retirement_fixture()
+        details = dict(Id="1", Config=dict(Labels={"com.milano.quotation.smooth": "web"}))
+        with patch.object(self.manager, "smoke"), patch("release.run", return_value="worker process") as command, \
+             patch("release.inspect", return_value=details), patch.object(self.manager, "event"):
+            self.manager.retire("routing-only")
+        self.assertEqual([c.args for c in command.call_args_list if "stop" in c.args],
+                         [("docker", "stop", "-t", "900", "old")])
+        self.assertEqual(len(self.manager.state["slots"]), 3)
+
+    def test_retire_never_stops_container_shared_with_active_route(self):
+        self.retirement_fixture()
+        self.manager.state["active"] = dict(self.old, release="routing-only")
+        with patch.object(self.manager, "smoke"), patch("release.run", return_value="") as command, \
+             patch("release.inspect") as inspect, patch.object(self.manager, "event"):
+            self.manager.retire("old")
+        inspect.assert_not_called()
+        self.assertFalse(any("stop" in c.args for c in command.call_args_list))
+
+    def test_retire_refuses_inflight_gateway_requests(self):
+        self.retirement_fixture()
+        with patch.object(self.manager, "smoke"), patch("release.run", return_value="worker process is shutting down") as command:
+            with self.assertRaisesRegex(RuntimeError, "in-flight"):
+                self.manager.retire("old")
+        self.assertFalse(any("stop" in c.args for c in command.call_args_list))
+
+    def test_retire_preserves_worker_even_if_aliased_in_historical_slot(self):
+        self.retirement_fixture()
+        self.old["backend"] = "worker"
+        with patch.object(self.manager, "smoke"), patch("release.run", return_value="") as command, \
+             patch("release.inspect") as inspect, patch.object(self.manager, "event"):
+            self.manager.retire("old")
+        inspect.assert_not_called()
+        self.assertFalse(any("stop" in c.args for c in command.call_args_list))
+
     def test_public_failure_restores_old_route_without_stopping_any_container(self):
         with patch.object(self.manager, "smoke"), patch.object(self.manager, "marker", return_value="old"), \
              patch.object(self.manager, "worker_pids", return_value=["10"]), patch.object(self.manager, "wait_marker"), \

@@ -545,7 +545,10 @@ class Release:
             raise RuntimeError("Old gateway workers still have in-flight requests; leave slot running")
         for role in ("backend", "frontend"):
             name = target[role]
-            if any(s[role] == name for key,s in self.state["slots"].items() if key != release):
+            # Several historical releases may alias one drained container (e.g.
+            # a routing-only release). Only the active route prevents retirement;
+            # rollback resumes retained containers after verifying their identity.
+            if name == self.state["active"][role] or name in (self.c["worker"], self.c["frontend"]):
                 continue
             details = inspect(name)
             if details["Id"] != target[role + "_id"] or details["Config"].get("Labels", {}).get("com.milano.quotation.smooth") not in ("web", "frontend"):
