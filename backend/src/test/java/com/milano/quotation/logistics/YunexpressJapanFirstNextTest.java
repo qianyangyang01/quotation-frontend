@@ -72,8 +72,11 @@ class YunexpressJapanFirstNextTest {
         for(var before:previous)if(!before.path("countryCode").asText().equals("JP")) {
             var after=new ArrayList<JsonNode>();for(var r:c.path("rows"))if(r.path("rowKey").equals(before.path("rowKey")))after.add(r);
             assertEquals(1,after.size());
-            for(String field:List.of("pricingModel","pricePerKg","registrationFee","billingStepKg","minChargeWeightKg","weightFromKg","weightToKg","zoneName","etaMinDays","etaMaxDays"))
-                assertEquals(before.path(field).asText(),after.get(0).path(field).asText(),field+": "+before.path("rowKey"));
+            for(String field:List.of("pricingModel","pricePerKg","registrationFee","billingStepKg","minChargeWeightKg","weightFromKg","weightToKg","zoneName","etaMinDays","etaMaxDays")) {
+                var a=before.path(field);var b=after.get(0).path(field);
+                if(a.isNumber()&&b.isNumber())assertEquals(0,a.decimalValue().compareTo(b.decimalValue()),field+": "+before.path("rowKey"));
+                else assertEquals(a.asText(),b.asText(),field+": "+before.path("rowKey"));
+            }
         }
         String output=System.getenv("YUNEXPRESS_JAPAN_PARSED");if(output!=null)Files.writeString(Path.of(output),c.toPrettyString());
     }
