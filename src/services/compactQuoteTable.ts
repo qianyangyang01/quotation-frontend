@@ -1,6 +1,6 @@
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
 import type { QuoteCopyMetadata } from '@/data/quoteCopyMetadata'
-import { normalizeQuoteSheetOrder, quoteSheetCell, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { normalizeQuoteSheetOrder, quoteSheetCell, quoteSheetProviderKey, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import type { QuoteLocalPhoto } from './quoteLocalPhotos'
 import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
 
@@ -10,6 +10,18 @@ const plain = (value: string) => {
   return /^[=+@-]/.test(text.trimStart()) ? "'" + text : text
 }
 export type CompactPhoto = { dataUrl: string; width: number; height: number }
+// Chinese display names for this internal copy format only. Match whole names so
+// custom channel descriptions and weighted-average labels remain intact.
+const chineseProviders = new Map(Object.entries({
+  Yanwen: '燕文', '4PX': '递四方', YunExpress: '云途', 'SFYD Express': '云速递',
+  'SF Express': '顺丰', 'Wanb Express': '万邦', 'SDH Express': '闪电猴',
+  SunYou: '顺友', TopYou: '通邮', JYTD: '捷易通达', JITO: '极通环球',
+  'Hua Hai': '花海', Rongding: '容鼎', Qiaojie: '巧捷', 'Jisu International': '急速国际',
+  Baizhou: '百洲', 'China Post': '中国邮政', Cainiao: '菜鸟',
+  FedEx: '联邦快递', DHL: '敦豪', UPS: '联合包裹',
+}).map(([name, chinese]) => [quoteSheetProviderKey(name), chinese]))
+
+const chineseProvider = (name: string) => chineseProviders.get(quoteSheetProviderKey(name)) ?? name
 /** Embed decoded, locally owned photos: no expiring URLs or asset uploads. */
 export function compactTablePhotos(photos: readonly QuoteLocalPhoto[]): CompactPhoto[] {
   return photos.map(photo => {
@@ -63,7 +75,7 @@ export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly Co
     for(let j=i;j<end;j++){
       const row=sheet.rows[j]!, isFirst=j===i, bg=j%2?'#fff2e9':'#ffffff'
       const prices=row.prices.map(value=>value==null?'—':value.toFixed(2))
-      const value = (key: Exclude<Group, 'prices'>) => key === 'sku' ? (isFirst ? row.sku ?? '' : '') : key === 'product' ? '' : key === 'sizeRules' ? (isFirst ? sheet.sizeRules ?? '' : '') : quoteSheetCell(row, key)
+      const value = (key: Exclude<Group, 'prices'>) => key === 'sku' ? (isFirst ? row.sku ?? '' : '') : key === 'product' ? '' : key === 'sizeRules' ? (isFirst ? sheet.sizeRules ?? '' : '') : key === 'provider' ? chineseProvider(row.provider) : quoteSheetCell(row, key)
       textRows.push([...metadataValues.map(plain), ...groups.flatMap(key => key === 'prices' ? prices : [plain(value(key))])])
       const cells = groups.map(key => {
         if (key === 'prices') return prices.map((price,k)=>row.prices[k]==null?cell(price,115):`<td width="115" x:num="${price}" style='${style}width:86.25pt;mso-number-format:"0.00";font-weight:bold'>${price}</td>`).join('')

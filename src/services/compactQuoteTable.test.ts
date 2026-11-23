@@ -7,6 +7,19 @@ const sheet=():CustomerQuoteSheet=>({agent:'Private agent',date:'2026-11-20',qua
   {key:'b',number:2,sku:'TC2602578-5\n30CM',country:'United Kingdom',provider:'SF Express',shippingTime:'7 days',prices:[29.10,54.70,80.30],sourceDescription:'Private cost'},
 ]})
 afterEach(()=>vi.unstubAllGlobals())
+it('copies provider names in Chinese in both formats without changing the saved sheet', () => {
+  const input = sheet()
+  const names = ['Rongding', 'SFYD Express', 'JITO', 'YunExpress', ' sfyd express ', '容鼎', '50%顺丰商派 + 50%燕文', 'Rongding 专线', 'Custom Provider']
+  input.rows = names.map((provider, index) => ({ ...input.rows[0], key: String(index), provider }))
+  const before = JSON.stringify(input)
+  const result = compactQuoteTable(input)
+  const host = document.createElement('div'); host.innerHTML = result.table
+  const expected = ['容鼎', '云速递', '极通环球', '云途', '云速递', '容鼎', '50%顺丰商派 + 50%燕文', 'Rongding 专线', 'Custom Provider']
+  expect([...host.querySelectorAll('tbody tr')].map(row => row.lastElementChild!.textContent)).toEqual(expected)
+  expect(result.text.split('\n').slice(1).map(row => row.split('\t').at(-1))).toEqual(expected)
+  expect([...host.querySelectorAll('td[x\\:num]')].map(cell => cell.getAttribute('x:num'))).toEqual(input.rows.flatMap(row => row.prices.map(price => price!.toFixed(2))))
+  expect(JSON.stringify(input)).toBe(before)
+})
 it('preserves missing commission and safely copies customer text without formulas or HTML', () => {
   const input = sheet()
   const result = compactQuoteTable(input, [], { salesperson: '', customerName: '=1+1<script>bad</script>', customerGrade: 'E', commissionThreshold: null })
@@ -25,8 +38,8 @@ it('follows moved column groups, quantity columns and row order without changing
   const host=document.createElement('div');host.innerHTML=result.table
   expect([...host.querySelectorAll('thead tr:first-child th:not([data-copy-metadata])')].map(cell=>cell.textContent)).toEqual(['Logistics Provider','Quote by Quantity (USD)','Country / Zone','SKU','Product','Note'])
   expect([...host.querySelectorAll('thead tr:last-child th')].map(cell=>cell.textContent)).toEqual(['3 pcs','1 pc','2 pcs'])
-  expect([...host.querySelectorAll('tbody tr:first-child td')].slice(5,10).map(cell=>cell.textContent)).toEqual(['SF Express','80.30','29.10','54.70','United Kingdom'])
-  expect(result.text.split('\n')[1].split('\t').slice(5,10)).toEqual(['SF Express','80.30','29.10','54.70','United Kingdom'])
+  expect([...host.querySelectorAll('tbody tr:first-child td')].slice(5,10).map(cell=>cell.textContent)).toEqual(['顺丰','80.30','29.10','54.70','United Kingdom'])
+  expect(result.text.split('\n')[1].split('\t').slice(5,10)).toEqual(['顺丰','80.30','29.10','54.70','United Kingdom'])
   expect(JSON.stringify(input)).toBe(before)
 })
 it('merges repeated SKU and photos while keeping exact prices as numeric cells',()=>{
