@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="yanwen-japan-first-next-2026.11.21-v27";
+    public static final String VERSION="yunexpress-japan-first-next-2026.11.23-v28";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
@@ -1351,6 +1351,7 @@ public class LogisticsSourceParser {
         if(tongyouSensitive)section="标准挂号类-敏感";
         var yunexpress=provider.equals("云途")?yunexpressAdditional(source):null;
         if(yunexpress!=null)section=yunexpress.name();
+        if(yunexpress!=null&&yunexpress.code().equals(YunexpressJapanFirstNext.CODE))parseYunexpressJapanFirstNext(source,file,channels);
         var yanwenWanbang=yanwenWanbangAdditional(source,provider);
         if(yanwenWanbang!=null)section=yanwenWanbang.name();
         var qiaojie=provider.equals(QiaojieSourceRules.PROVIDER)?qiaojieProduct(source):null;
@@ -1361,6 +1362,7 @@ public class LogisticsSourceParser {
         int auxiliary=-1;boolean example=false,reference=false,sourceNotes=false;
         var allNotes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
+            if(source.parsedRows.contains(r))continue;
             var rowText=String.join("|",source.rowTexts(r).stream().filter(value->!value.isBlank()).toList());
             if(rowText.isBlank()&&source.width(r)>0)rowText=String.join("|",source.resolvedTexts(r));
             if(rowText.isBlank())continue;
@@ -1759,6 +1761,56 @@ public class LogisticsSourceParser {
             }
         }
         return end;
+    }
+
+    private void parseYunexpressJapanFirstNext(Source source,String file,Map<String,ObjectNode> channels) {
+        // Inspect the dedicated Japan section independently: damaged first/next headers
+        // must never fall back to the preceding kilogram-price header or the old filter.
+        Map<String,Integer> headers=Map.of();Set<String> duplicateHeaders=Set.of();int headerRow=-1;
+        var sourceBands=new HashSet<String>();ObjectNode selectedTarget=null;int japanRows=0;
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(headerRow>=0&&referenceSection(source,r))break;
+            var found=new HashMap<String,Integer>();var duplicates=new HashSet<String>();
+            for(int col=0;col<source.width(r);col++) {
+                String label=clean(source.text(r,col));
+                String field=label.equals("首重")?"first":label.equals("续重")?"next":
+                    aliases.firstMatch("云途",label,List.of("country","weightRange","minimumWeight","billingStep","eta","zone"));
+                if(!field.isBlank()&&found.put(field,col)!=null)duplicates.add(field);
+            }
+            if(found.containsKey("country")){headers=found;duplicateHeaders=duplicates;headerRow=r;continue;}
+            boolean japan=headers.containsKey("country")&&countryCode(source.text(r,headers.get("country"))).equals("JP");
+            if(!japan)japan=source.rowTexts(r).stream().anyMatch(t->Set.of("日本","JP").contains(t.trim()));
+            if(!japan)continue;
+            var codes=titleProductCodes(source,"云途");var code=codes.size()==1?codes.iterator().next():"";
+            var target=selected(source,"云途",YunexpressJapanFirstNext.NAME,code,r,channels,true);
+            source.parsedRows.add(r);if(target==null)continue;selectedTarget=target;japanRows++;
+            try {
+                if(!code.equals(YunexpressJapanFirstNext.CODE))throw new IllegalArgumentException("云途日本须有唯一产品代码BKPHR，不能猜测渠道归属");
+                var required=List.of("country","weightRange","minimumWeight","billingStep","first","next");
+                if(!headers.keySet().containsAll(required)||required.stream().anyMatch(duplicateHeaders::contains))
+                    throw new IllegalArgumentException("云途日本表头缺失或重复：须有国家、重量(KG)、最低计费重(KG)、进位制(KG)、首重、续重");
+                for(String key:List.of("weightRange","minimumWeight","billingStep"))
+                    if(!clean(source.text(headerRow,headers.get(key))).toUpperCase(Locale.ROOT).matches(".*(?:KG|公斤|千克).*"))
+                        throw new IllegalArgumentException("云途日本重量与进位列须明确KG单位，禁止套用默认单位");
+                if(headers.containsKey("zone")&&!source.text(r,headers.get("zone")).isBlank())throw new IllegalArgumentException("云途日本出现分区价格，须重新核对");
+                var range=parseRange(source.text(r,headers.get("weightRange")));
+                var row=mapper.createObjectNode().put("areaName","日本").put("countryCode","JP").put("sourceCountry","日本").put("sourceCountryCode","JP")
+                    .put("sourceProductCode",code).put("sourceCode",code).put("currency","CNY").put("zoneName","")
+                    .put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo)
+                    .put("sourceWeightRange",source.text(r,headers.get("weightRange")));
+                for(var pair:Map.of("sourceFirstWeightKg","minimumWeight","sourceNextWeightKg","billingStep","sourceFirstWeightPrice","first","sourceNextWeightPrice","next").entrySet())
+                    numeric(row,pair.getKey(),source,r,headers.get(pair.getValue()),target,false);
+                row.put("sourceFirstWeightCell",source.address(r,headers.get("minimumWeight"))).put("sourceNextWeightCell",source.address(r,headers.get("billingStep")))
+                    .put("sourceFirstPriceCell",source.address(r,headers.get("first"))).put("sourceNextPriceCell",source.address(r,headers.get("next")))
+                    .put("sourceWeightCell",source.address(r,headers.get("weightRange"))).put("sourceMinimumWeightKind","column");
+                var eta=new Columns();eta.headerRow=headerRow;eta.eta=headers.getOrDefault("eta",-1);readRowEta(row,target,source,r,eta);
+                var expanded=YunexpressJapanFirstNext.expand(row);
+                if(!sourceBands.add(range.from+":"+range.to))throw new IllegalArgumentException("云途日本重量段重复，禁止选择其中一套价格");
+                for(var price:expanded)add(target,price,source,r,file);
+            } catch(IllegalArgumentException failure){issue(target,r+1,"云途日本首续重",failure.getMessage(),"error");}
+        }
+        if(japanRows>0&&(japanRows!=2||!sourceBands.equals(Set.of("0.0:2.0","2.0:5.0"))))
+            issue(selectedTarget,0,"云途日本首续重","日本两档必须完整且唯一：0<W≤2kg及2<W≤5kg，禁止漏行后部分更新","error");
     }
 
     private boolean parseYanwenJapanFirstNext(Source source,int r,String provider,String file,String section,Columns columns,Map<String,ObjectNode> channels) {
