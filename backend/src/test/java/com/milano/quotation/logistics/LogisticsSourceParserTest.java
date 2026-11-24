@@ -265,9 +265,9 @@ class LogisticsSourceParserTest {
         }
     }
     @Test void sfUsesRowLevelSettlementDiscountOrOriginalWithoutDoubleDiscounting()throws Exception {
-        for(boolean xlsx:List.of(false,true))try(Workbook book=xlsx?new XSSFWorkbook():new HSSFWorkbook()) {
+        for(String header:List.of("折扣后运费","折扣后金额"))for(boolean xlsx:List.of(false,true))try(Workbook book=xlsx?new XSSFWorkbook():new HSSFWorkbook()) {
             var s=book.createSheet("服装专线");
-            row(s,0,"国家名称","Code","运费/kg","折扣率","折扣后运费","专递操作费/票","计费重量限制（kg）");
+            row(s,0,"国家名称","Code","运费/kg","折扣率",header,"专递操作费/票","计费重量限制（kg）");
             row(s,1,"西班牙","ES",72,"","",18,"0.001-1KG");
             row(s,2,"西班牙","ES",76," ","\u00a0",18,"1.001-30KG");
             row(s,3,"德国","DE",71,.6,45.4,22,"0.001-0.1KG");
