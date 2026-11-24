@@ -49,3 +49,16 @@ describe('independent batch single quotation', () => {
     expect(result.sheet.rows[49]).toMatchObject({sku:'SKU49',number:50,prices:[50,100,150]})
   })
 })
+
+
+it('uses each SKU note snapshot, preserving deliberate blanks and legacy fallback without rewriting sources', () => {
+ const items = ['A','B','C','D'].map(sku => batchItem(sku))
+ items.forEach(item => { item.sheet.sizeRules = 'Old sheet note' })
+ items[0]!.input.customerQuote!.sizeRules = 'Only A'
+ items[1]!.input.customerQuote!.sizeRules = ''
+ items[2]!.input.customerQuote!.sizeRules = null
+ const before = JSON.stringify(items)
+ const result = mergeBatchSingle(items)
+ expect(result.sheet.rows.map(row => row.note)).toEqual(['Only A','','','Old sheet note'])
+ expect(JSON.stringify(items)).toBe(before)
+})

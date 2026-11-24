@@ -7,7 +7,7 @@ import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRec
 
 export type QuoteSheetContact = { agent: string; whatsapp: string }
 export type CustomerPriceSnapshot = { quantityUnits?: QuoteSheetUnits; photos?: QuoteSheetPhoto[]; showPhotos?: boolean; rowOrder?: string[]; sizeRules?: string | null; sizeRulesEnabled?: boolean; averagePlans?: AveragePlan[]; hiddenOptionIds?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
-export type CapturedSheetPrices = { quantityUnits?: QuoteSheetUnits; photos?: QuoteSheetPhoto[]; showPhotos?: boolean; rowOrderKeys?: string[]; sizeRules?: string | null; sizeRulesEnabled?: boolean; averagePlans?: AveragePlan[]; hiddenRowKeys?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
+export type CapturedSheetPrices = { skuNotes?: Record<string, string>; quantityUnits?: QuoteSheetUnits; photos?: QuoteSheetPhoto[]; showPhotos?: boolean; rowOrderKeys?: string[]; sizeRules?: string | null; sizeRulesEnabled?: boolean; averagePlans?: AveragePlan[]; hiddenRowKeys?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
 
 export function recordHiddenOptionIds(record: QuotationRecord): string[] {
   return [...(record.customerQuote?.hiddenOptionIds ?? record.sheetQuote?.hiddenOptionIds ?? [])]

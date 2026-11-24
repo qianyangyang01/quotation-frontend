@@ -62,6 +62,36 @@ class BatchIndependentQuotationPostgresIntegrationTest {
         return mapper.readTree(mvc.perform(patch("/api/v1/quotations/"+record.path("id").asText()+"/finance-review").session(sessions.get("finance")).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
     }
     long count(String table) { return jdbc.sql("select count(*) from "+table).query(Long.class).single(); }
+    @Test void savesIndependentSkuNotesAndReadsThemBackWithoutChangingExistingQuotes() throws Exception {
+        var history = save(UUID.randomUUID().toString(), ordinary(1));
+        var previous = read(history.at("/records/0/id").asText());
+        var body = ordinary(3); var document = (ObjectNode) body.path("document");
+        var notes = List.of("Box packaging\nHandle with care", "Bag packaging", "");
+        for (int i = 0; i < notes.size(); i++) {
+            var item = (ObjectNode) document.path("items").get(i);
+            ((ObjectNode) item.at("/input/customerQuote")).put("sizeRules", notes.get(i)).put("sizeRulesEnabled", true);
+            ((ObjectNode) item.path("sheet")).put("sizeRules", notes.get(i));
+            ((ObjectNode) item.at("/sheet/rows/0")).put("note", notes.get(i));
+            ((ObjectNode) document.at("/sheet/rows").get(i)).put("note", notes.get(i));
+        }
+        ((ObjectNode) document.path("sheet")).put("sizeRules", notes.get(0));
+        var before = body.deepCopy(); long countBefore = count("quotation_record");
+        var key = UUID.randomUUID().toString(); var result = save(key, body);
+        assertEquals(3, result.path("records").size());
+        for (int i = 0; i < notes.size(); i++) {
+            var record = read(result.path("records").get(i).path("id").asText());
+            assertEquals("SKU" + i, record.path("primarySku").asText());
+            assertEquals(notes.get(i), record.at("/customerQuote/sizeRules").asText());
+            assertEquals(notes.get(i), record.at("/sheetQuote/sizeRules").asText());
+            assertTrue(record.at("/customerQuote/sizeRulesEnabled").asBoolean());
+            assertEquals(before.at("/document/items/" + i + "/input/customerQuote/rows"), record.at("/customerQuote/rows"));
+        }
+        assertEquals(result, save(key, body));
+        assertEquals(countBefore + 3, count("quotation_record"));
+        assertEquals(previous, read(previous.path("id").asText()));
+        assertEquals(before, body);
+    }
+
     @Test void fourteenSingleRecordsUseOriginalReviewAndBatchSearchWithoutTouchingLegacy() throws Exception {
         long before=count("quotation_record"), legacy=count("batch_single_quotation");
         var body=ordinary(14);var key=UUID.randomUUID().toString();var result=save(key,body);

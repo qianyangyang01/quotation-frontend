@@ -5,7 +5,7 @@ import type { QuotationRecord } from '@/data/quotationRecords'
 import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { buildQuotationWeightSnapshot } from '@/data/quotationWeightSnapshot'
-import { batchItemLabel, mergeBatchShipping, mergeBatchSingle, type BatchSingleDocument, type BatchSingleItem } from './batchSingleQuotation'
+import { batchItemLabel, batchItemNote, mergeBatchShipping, mergeBatchSingle, type BatchSingleDocument, type BatchSingleItem } from './batchSingleQuotation'
 
 /** Every route has a SKU-scoped UI identity, even when all products use the same channel. */
 export function batchSheetEditorSource(document: BatchSingleDocument) {
@@ -32,7 +32,8 @@ export function batchSheetEditorSource(document: BatchSingleDocument) {
     }
   }
   const initialSheet = { ...document.sheet, rows: document.sheet.rows.map(row => ({ ...row, key: row.averageId ? `average:${averageId(Number(row.key.split(':')[0]), row.averageId)}` : entries.find(entry => entry.mergedKey === row.key)?.key || row.key })) }
-  return { entries, rows: entries.map(entry => entry.row), initialQuote: snapshots(false), initialSystemQuote: snapshots(true), initialSheet }
+  const skuNotes = document.items[0]?.input.quoteMode === 'shipping-only' ? undefined : Object.fromEntries(document.items.map(item => [batchItemLabel(item), batchItemNote(item)]))
+  return { skuNotes, entries, rows: entries.map(entry => entry.row), initialQuote: snapshots(false), initialSystemQuote: snapshots(true), initialSheet }
 }
 
 export function captureBatchSheet(document: BatchSingleDocument, source: ReturnType<typeof batchSheetEditorSource>, captured: CapturedSheetPrices, sheet: CustomerQuoteSheet): BatchSingleDocument {
@@ -50,7 +51,7 @@ export function captureBatchSheet(document: BatchSingleDocument, source: ReturnT
     const ownedKeys = (captured.rowOrderKeys ?? []).filter(key => ownership.get(key) === index)
     const snapshot: CustomerPriceSnapshot = {
       quantityUnits: captured.quantityUnits ? { ...captured.quantityUnits } : undefined, quantities: [...captured.quantities], contact: captured.contact, photos: captured.photos, showPhotos: captured.showPhotos,
-      sizeRules: captured.sizeRules, sizeRulesEnabled: captured.sizeRulesEnabled,
+      sizeRules: captured.skuNotes?.[batchItemLabel(item)] ?? captured.sizeRules, sizeRulesEnabled: captured.sizeRulesEnabled,
       hiddenOptionIds: entries.filter(entry => captured.hiddenRowKeys?.includes(entry.key)).map(entry => entry.option.id),
       rowOrder: captureQuoteRowOrder(ownedKeys, optionId),
       averagePlans: mapAveragePlans(captured.averagePlans?.filter(plan => ownership.get(`average:${plan.id}`) === index), optionId),
@@ -63,7 +64,7 @@ export function captureBatchSheet(document: BatchSingleDocument, source: ReturnT
     })
     if (!rows.length) throw new Error(`${item.input.primarySku} 的报价行已全部隐藏，请恢复至少一行，或在处理清单中取消选入该 SKU`)
     const weight = item.input.weightSnapshot
-    return { ...item, input: { ...item.input, ...(item.input.quoteMode === 'shipping-only' ? { shippingBatchSheet: { ...sheet, rows } } : {}), ...(weight ? { weightSnapshot: buildQuotationWeightSnapshot(weight.items, weight.specialPackagingGrams, [...weight.quantities.map(row => row.quantity), ...captured.quantities]) } : {}), customerQuote: snapshot, sheetQuote: snapshot, systemQuantityQuotes: { quantities: [...captured.quantities], rows: entries.map(entry => ({ optionId: entry.option.id, prices: [...captured.rows.find(row => row.key === entry.key)!.systemPrices] })) } }, sheet: { ...sheet, rows } }
+    return { ...item, input: { ...item.input, ...(item.input.quoteMode === 'shipping-only' ? { shippingBatchSheet: { ...sheet, rows } } : {}), ...(weight ? { weightSnapshot: buildQuotationWeightSnapshot(weight.items, weight.specialPackagingGrams, [...weight.quantities.map(row => row.quantity), ...captured.quantities]) } : {}), customerQuote: snapshot, sheetQuote: snapshot, systemQuantityQuotes: { quantities: [...captured.quantities], rows: entries.map(entry => ({ optionId: entry.option.id, prices: [...captured.rows.find(row => row.key === entry.key)!.systemPrices] })) } }, sheet: { ...sheet, sizeRules: captured.sizeRulesEnabled === false ? null : snapshot.sizeRules, rows } }
   })
   const result = (items[0]?.input.quoteMode === 'shipping-only' ? mergeBatchShipping : mergeBatchSingle)(items as BatchSingleItem[])
   const rowsByKey = new Map(result.sheet.rows.map(row => [row.key, row]))

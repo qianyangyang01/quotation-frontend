@@ -1,12 +1,14 @@
 {
-  "version": "quotation-2026.11.23-06-release-menu",
-  "publishedOn": "2026-11-23",
+  "version": "quotation-2026.11.24-01-sku-note",
+  "publishedOn": "2026-11-24",
   "policy": "optional",
   "requiredEpoch": "notice-v1",
-  "title": "更新说明更好找了",
+  "title": "批量报价备注按 SKU 分开",
   "features": [
-    { "title": "右上角查看新功能", "description": "点击“新功能”，展开本次更新说明。", "location": "右上角 · 新功能" },
-    { "title": "说明更简洁", "description": "每项改动一句话，快速了解上线内容。", "location": "新功能 · 更新卡片" }
+    {
+      "title": "每个商品独立填写备注",
+      "description": "批量 SKU 报价的备注分别编辑、保存，图片和复制表格保留对应内容。",
+      "location": "批量 SKU 报价 · 合并报价单"
+    }
   ]
 }
-
