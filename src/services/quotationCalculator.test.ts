@@ -320,8 +320,8 @@ describe('bundle SKU calculation', () => {
     expect(bundlePurchaseCost([{ ...taxedItems[0], purchaseInvoiceTaxApplied: false }], [taxed], '10')).toBe(2)
   })
 
-  it('rounds CNY before converting to USD and guards invalid rates', () => {
-    expect(usdPriceFromCny(70.126, 7)).toBeCloseTo(10.018571, 6)
+  it('preserves intermediate CNY when converting to USD and guards invalid rates', () => {
+    expect(usdPriceFromCny(70.126, 7)).toBeCloseTo(10.018, 6)
     expect(usdPriceFromCny(-1, 0)).toBe(0)
   })
 

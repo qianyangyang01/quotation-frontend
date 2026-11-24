@@ -50,7 +50,7 @@ export function calculateChannelTax(settings: FinanceTaxSettings, country: strin
     const taxUsd = channelTaxAmount(rule, context || {})
     const feeMode = rule.mode === 'weight' ? 'weight-order' : rule.mode === 'unavailable' ? 'missing' : rule.mode
     return { included: rule.mode === 'exempt', configured: true, ratePercent: null, fixedFeeUsd: rule.mode === 'fixed-order' ? taxUsd : 0,
-      feeMode, taxUsd, totalUsd: decimal(baseUsd).plus(taxUsd).toDecimalPlaces(2).toNumber(),
+      feeMode, taxUsd, totalUsd: decimal(baseUsd).plus(taxUsd).toNumber(),
       label: rule.mode === 'exempt' ? '已含税' : rule.mode === 'no-tax' ? '无关税' : `关税 $${taxUsd.toFixed(2)}/单${rule.mode === 'weight' ? '（按整单重量）' : ''}`,
       calculation: { rule: 'channel-tax-v1', setting: { ...rule }, country: setting!.country, weightKg: context?.weightKg || 0, usdCny: context?.usdCny || 0, eurUsd: context?.eurUsd || 0, taxUsd } }
   } catch (error) {

@@ -102,8 +102,9 @@ it.each(['single', 'womens-single'] as const)('generates %s: 14 SKUs x 15 channe
         expect(sample.costCny).toBeCloseTo(cost.toNumber(), 8)
         expect(sample.coefficient).toBe(factor)
         expect(sample.baseQuoteCny).toBeCloseTo(cost.times(factor).toNumber(), 8)
-        // Same existing tax/surcharge and 0.05 rounding sequence; reference factor is never compounded.
-        const usd = cost.times(factor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).div(6).plus('.3').toDecimalPlaces(2, Decimal.ROUND_HALF_UP).plus('.3').div('.05').ceil().times('.05').toNumber()
+        // Keep intermediate precision through exchange, duty and surcharge;
+        // reference factor is never compounded and only final USD is rounded.
+        const usd = cost.times(factor).div(6).plus('.3').plus('.3').div('.05').ceil().times('.05').toNumber()
         const snapshot = item.input.systemQuantityQuotes!
         const index = snapshot.quantities.indexOf(sample.quantity)
         if (index >= 0) expect(snapshot.rows.find(row => row.optionId === option.id)!.prices[index]).toBe(usd)

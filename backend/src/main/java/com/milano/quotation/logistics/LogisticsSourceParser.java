@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="yunexpress-japan-first-next-2026.11.23-v28";
+    public static final String VERSION="baizhou-actual-freight-2026.11.24-v29";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
@@ -486,7 +486,7 @@ public class LogisticsSourceParser {
             if(supportedCountryCode(code)&&!code.equals("US")){source.filteredOtherRows.put(r,"用户限定仅美国，不导入其他国家价格："+rawCountry);continue;}
             source.parsedRows.add(r);
             if(!limits.containsKey(code)){issue(target,r+1,"国家","BZ503国家缺失或超出已适配范围："+rawCountry,"error");continue;}
-            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
+            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.MODEL)
                     .put("areaName",countryName(rawCountry)).put("countryCode",code).put("zoneName","").put("originRegion","")
                     .put("sourceProductCode",actualCode).put("sourceCode",actualCode).put("sourceCountry",rawCountry)
                     .put("sourceCountryCell",source.address(r,country)).put("sourceWeightRange",source.text(r,weight))
@@ -494,7 +494,7 @@ public class LogisticsSourceParser {
                     .put("sourceFeeLabel",source.text(header,fee)).put("sourcePriceUnit","RMB/KG")
                     .put("minChargeWeightKg",new BigDecimal(".001")).put("sourceMinimumWeightKind","user-confirmed")
                     .put("sourceMinimumWeightText","2026-11-16 用户确认：1g起计，按1g向上进位")
-                    .put("sourceRoundingConfirmation","2026-11-16 用户确认：公斤价乘计费重量加一次挂号费，合计向上取整到人民币元")
+                    .put("sourceRoundingConfirmation","2026-11-24 用户修正：公斤价乘计费重量加一次挂号费，不向上取整到人民币元；运费按人民币分四舍五入，保留1g计费进位")
                     .put("sourceServiceConfirmation","2026-11-16 用户确认：仅美国、包税、全邮编、只发服装；覆盖原表税费及邮编限制")
                     .put("notes","用户确认：仅美国、包税、全邮编、只发服装；尺寸和特殊包裹条件按实际包裹核对");
             // Country spans A:B in the supplied table; a real, separate zone must never be silently discarded.

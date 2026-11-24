@@ -43,7 +43,8 @@ describe('quotation decimal precision acceptance', () => {
   })
   it.each([
     ['O5', 87, 18, 87, 16, 23.75, 43.55, 159.13, 291.79],
-    ['cosmetics', 67, 19, 63, 19, 23.40, 42.85, 156.78, 287.10],
+    // Raw one-piece total is 23.40132: preserve it until the 0.05 ceiling.
+    ['cosmetics', 67, 19, 63, 19, 23.45, 42.85, 157.12, 287.10],
     ['tracked', 55, 18, 55, 16, 22.95, 41.90, 153.77, 280.73],
   ] as const)('reproduces both KJ2601048 quotes for %s', (_, rate1, fee1, rate2, fee2, one, two, cny1, cny2) => {
     const record = normalizePurchaseRecord({ sku: 'KJ2601048', purchasePriceCny: 90, taxPoint: 0.08, minOrderQty: 1, weightG: 140, catalogState: 'ready' })

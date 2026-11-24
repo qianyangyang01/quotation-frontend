@@ -488,7 +488,7 @@ describe('quotation finance initialization for an employee', () => {
     expect(state.exchange.eurUsd).toBe(1.17)
     const product = { purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct
     expect(state.salePrice(product)).toBe(121.605)
-    expect(state.usdPriceFromCny(state.salePrice(product))).toBeCloseTo(121.61 / 6.7, 10)
+    expect(state.usdPriceFromCny(state.salePrice(product))).toBeCloseTo(121.605 / 6.7, 10)
 
     const select = gradeField().querySelector('select')!
     select.value = 'A'

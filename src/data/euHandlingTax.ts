@@ -31,7 +31,7 @@ export function calculateEuHandlingTax(settings: FinanceTaxSettings, country: st
     return {
       included, configured: true, ratePercent: null,
       fixedFeeUsd: weighted ? 0 : taxUsd, feeMode: included ? 'exempt' : weighted ? 'weight-order' : 'fixed-order', taxUsd,
-      totalUsd: decimal(baseUsd).plus(taxUsd).toDecimalPlaces(2).toNumber(),
+      totalUsd: decimal(baseUsd).plus(taxUsd).toNumber(),
       label: included ? '已含税' : `欧盟关税 $${eu.taxUsd.toFixed(2)} + 本国处理费 $${handlingFeeUsd.toFixed(2)} = $${taxUsd.toFixed(2)}/单${weighted ? '（按整单重量）' : ''}`,
       calculation: { rule: 'eu-handling-v1', country: local.country, channelKey: context?.channelKey || '', weightKg: context?.weightKg || 0, euTaxUsd: eu.taxUsd, handlingFeeUsd, taxUsd },
     }

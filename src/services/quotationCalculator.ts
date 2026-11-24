@@ -241,7 +241,9 @@ export function singleShipmentDimensions(input: SingleWeightInput, quantity = no
 
 export function usdPriceFromCny(cny: number, usdCny: number) {
   const rate = Math.max(0.0001, Number(usdCny) || 0)
-  return decimal(Math.max(0, Number(cny) || 0)).toDecimalPlaces(2).div(rate).toNumber()
+  // This is an intermediate sale amount after the customer coefficient, not
+  // a settled CNY charge. Keep its precision until the final USD ceiling.
+  return decimal(Math.max(0, Number(cny) || 0)).div(rate).toNumber()
 }
 
 export function hasQuotationProduct(mode: import('@/data/quotationModes').QuotationMode, primarySku: string, bundleItems: Array<{ sku: string; quantityPerSet: number }>) {

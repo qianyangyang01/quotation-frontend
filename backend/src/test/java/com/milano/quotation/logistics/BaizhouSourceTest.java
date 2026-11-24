@@ -38,7 +38,9 @@ class BaizhouSourceTest {
         var c=parse(fixture());assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(1,c.path("rows").size());
         assertEquals("百州",c.path("providerName").asText());assertEquals("服装",c.path("logisticsAttribute").asText());
         var engine=new LogisticsBillingEngine(mapper);
-        for(double[] pair:new double[][]{{.00001,21},{.1,28},{.100001,29},{30,2420}})
+        assertEquals("per-kg-1g",c.path("rows").get(0).path("pricingModel").asText());
+        assertTrue(c.path("rows").get(0).path("sourceRoundingConfirmation").asText().contains("2026-11-24"));
+        for(double[] pair:new double[][]{{.00001,20.08},{.1,28},{.100001,28.08},{30,2420}})
             assertEquals(pair[1],engine.calculate(c.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",pair[0])).path("total").asDouble());
     }
     @Test void missingPricesIdentityCountriesAndTiersFailClosed()throws Exception {
@@ -91,7 +93,7 @@ class BaizhouSourceTest {
             for(int gram=1;gram<=max;gram++){
                 BigDecimal w=BigDecimal.valueOf(gram,3);
                 var match=rows.stream().filter(r->w.compareTo(r.path("weightFromKg").decimalValue())>=0&&w.compareTo(r.path("weightToKg").decimalValue())<=0).toList();assertEquals(1,match.size());
-                var r=match.getFirst();var amount=w.multiply(r.path("pricePerKg").decimalValue()).add(r.path("registrationFee").decimalValue()).setScale(0,RoundingMode.CEILING);
+                var r=match.getFirst();var amount=w.multiply(r.path("pricePerKg").decimalValue()).add(r.path("registrationFee").decimalValue()).setScale(2,RoundingMode.HALF_UP);
                 assertEquals(0,amount.compareTo(engine.calculate(c.path("rows"),mapper.createObjectNode().put("country",country).put("weightKg",w)).path("total").decimalValue()));checked++;
             }
         }

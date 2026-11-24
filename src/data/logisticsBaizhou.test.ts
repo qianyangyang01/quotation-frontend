@@ -2,16 +2,24 @@ import { readFileSync } from 'node:fs'
 import { expect, it } from 'vitest'
 import { calculateLogisticsFee, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
+import { decimal } from '@/services/quotationDecimal'
 
 const base: LogisticsRule = { id: 999, name: 'BZ-欧美服装专线挂号', englishName: '', type: '专线', currency: 'CNY', published: '', status: '启用', dates: '', users: '', relations: [], phoneRequired: false, areaCount: 1, priceRowCount: 2, billingVerified: true, prices: [
   { countryCode: 'US', areaName: '美国', weightFromKg: 0, weightToKg: .1, pricePerKg: 81, registrationFee: 23 },
   { countryCode: 'US', areaName: '美国', weightFromKg: .101, weightToKg: .2, pricePerKg: 81, registrationFee: 21 },
-].map(r => normalizeLogisticsPriceRow({ ...r, weightFromInclusive: r.weightFromKg > 0, weightToInclusive: true, minChargeWeightKg: .001, pricingModel: 'per-kg-1g-ceil-cny', allowedMarks: '服装' })) }
+].map(r => normalizeLogisticsPriceRow({ ...r, weightFromInclusive: r.weightFromKg > 0, weightToInclusive: true, minChargeWeightKg: .001, pricingModel: 'per-kg-1g', allowedMarks: '服装' })) }
 
-it('rounds BZ503 grams before tier selection and totals after one ticket fee', () => {
-  for (const [weight, total] of [[.000001, 24], [.1, 32], [.100001, 30], [.2, 38]]) expect(calculateLogisticsFee(base, 'US', weight!, ['服装'])?.total).toBe(total)
+it('rounds BZ503 grams before tier selection but keeps freight cents after one ticket fee', () => {
+  for (const [weight, total] of [[.000001, 23.08], [.1, 31.1], [.100001, 29.18], [.2, 37.2]]) expect(calculateLogisticsFee(base, 'US', weight!, ['服装'])?.total).toBe(total)
   expect(calculateLogisticsFee(base, 'US', .200001, ['服装'])).toBeNull()
   expect(calculateLogisticsFee(base, 'CA', .1, ['服装'])).toBeNull()
+})
+
+it('leaves old published tariffs and other integer-yuan channels reproducible', () => {
+  const historical = { ...base, prices: base.prices.map(row => ({ ...row, pricingModel: 'per-kg-1g-ceil-cny' as const })) }
+  const before = JSON.stringify(historical)
+  for (const [weight, total] of [[.000001, 24], [.1, 32], [.100001, 30], [.2, 38]]) expect(calculateLogisticsFee(historical, 'US', weight!, ['服装'])?.total).toBe(total)
+  expect(JSON.stringify(historical)).toBe(before)
 })
 
 it.skipIf(!process.env.BAIZHOU_PACKAGE)('reconciles every source gram and fractional boundary against backend projection', () => {
@@ -22,8 +30,7 @@ it.skipIf(!process.env.BAIZHOU_PACKAGE)('reconciles every source gram and fracti
   let checked = 0
   for (const row of expected.rows) {
     for (let grams = Math.max(1, Math.round(row.weightFromKg * 1000)); grams <= Math.round(row.weightToKg * 1000); grams++) {
-      const centsNumerator = grams * row.pricePerKg + row.registrationFee * 1000
-      const expectedTotal = Math.ceil(centsNumerator / 1000)
+      const expectedTotal = decimal(grams).div(1000).times(row.pricePerKg).plus(row.registrationFee).toDecimalPlaces(2).toNumber()
       expect(calculateLogisticsFee(rule, row.countryCode, grams / 1000, ['服装'])?.total).toBe(expectedTotal)
       checked++
     }

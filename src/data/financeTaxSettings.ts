@@ -187,7 +187,7 @@ export function calculateFinanceQuoteTax(
 
   const fixedFeeUsd = finiteNonNegative(countrySetting.fixedFeeUsd)
   const taxUsd = decimal(fixedFeeUsd).toDecimalPlaces(2).toNumber()
-  const totalUsd = decimal(normalizedBase).plus(taxUsd).toDecimalPlaces(2).toNumber()
+  const totalUsd = decimal(normalizedBase).plus(taxUsd).toNumber()
   return {
     included: false,
     configured: true,
