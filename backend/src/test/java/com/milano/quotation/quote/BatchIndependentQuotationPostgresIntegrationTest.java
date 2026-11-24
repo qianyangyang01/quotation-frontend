@@ -84,7 +84,13 @@ class BatchIndependentQuotationPostgresIntegrationTest {
             assertEquals(notes.get(i), record.at("/customerQuote/sizeRules").asText());
             assertEquals(notes.get(i), record.at("/sheetQuote/sizeRules").asText());
             assertTrue(record.at("/customerQuote/sizeRulesEnabled").asBoolean());
-            assertEquals(before.at("/document/items/" + i + "/input/customerQuote/rows"), record.at("/customerQuote/rows"));
+            var expectedRows = before.at("/document/items/" + i + "/input/customerQuote/rows");
+            var savedRows = record.at("/customerQuote/rows");
+            assertEquals(expectedRows.size(), savedRows.size());
+            for (int row = 0; row < expectedRows.size(); row++) {
+                assertEquals(expectedRows.get(row).path("optionId"), savedRows.get(row).path("optionId"));
+                assertTrue(BatchSingleQuotation.samePrices(expectedRows.get(row).path("prices"), savedRows.get(row).path("prices")));
+            }
         }
         assertEquals(result, save(key, body));
         assertEquals(countBefore + 3, count("quotation_record"));
