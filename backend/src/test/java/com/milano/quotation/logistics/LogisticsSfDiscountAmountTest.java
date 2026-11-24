@@ -3,7 +3,6 @@ package com.milano.quotation.logistics;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
 import tools.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.*;
@@ -18,18 +17,40 @@ class LogisticsSfDiscountAmountTest {
         var scope=mapper.readTree(Files.readString(Path.of(System.getProperty("sf.scope"))));
         var parsed=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper)).parse(bytes,"顺丰国际电商产品价格表(20261123）.xlsx",new CompanyChannelScope(scope));
         assertEquals(6,parsed.path("channels").size());int count=0;
-        try(var book=WorkbookFactory.create(new java.io.ByteArrayInputStream(bytes))) {
+        // Independently read cached numeric XML values, without a second full XSSF model.
+        // The original has over a million empty formatted merges on an unrelated sheet.
+        var wanted=new java.util.HashSet<String>();for(var channel:parsed.path("channels"))for(var row:channel.path("rows"))wanted.add(row.path("sourceSheet").asText());
+        var original=originalNumericCells(bytes,wanted);
+        {
             for(var channel:parsed.path("channels")){
                 assertEquals(0,channel.path("errors").asInt(),channel.path("channelName").asText());
                 for(var row:channel.path("rows")){
                     if(!row.path("sourcePricingBasis").asText().equals("settlement"))continue;
-                    var cell=new org.apache.poi.ss.util.CellReference(row.path("sourceSettlementRateCell").asText());
-                    var source=book.getSheet(row.path("sourceSheet").asText()).getRow(cell.getRow()).getCell(cell.getCol());
-                    assertEquals(source.getNumericCellValue(),row.path("pricePerKg").asDouble(),cell.formatAsString());count++;
+                    var address=row.path("sourceSettlementRateCell").asText();
+                    var source=original.get(row.path("sourceSheet").asText()).get(address);
+                    assertNotNull(source,address);assertEquals(source.doubleValue(),row.path("pricePerKg").asDouble(),address);count++;
                 }
             }
         }
         assertTrue(count>150);Files.writeString(Path.of(System.getProperty("sf.parsed")),parsed.toPrettyString());
+    }
+    private java.util.Map<String,java.util.Map<String,java.math.BigDecimal>> originalNumericCells(byte[] bytes,java.util.Set<String> wanted)throws Exception{
+        var out=new java.util.HashMap<String,java.util.Map<String,java.math.BigDecimal>>();
+        var xml=javax.xml.stream.XMLInputFactory.newFactory();xml.setProperty(javax.xml.stream.XMLInputFactory.SUPPORT_DTD,false);xml.setProperty("javax.xml.stream.isSupportingExternalEntities",false);
+        try(var pkg=org.apache.poi.openxml4j.opc.OPCPackage.open(new java.io.ByteArrayInputStream(bytes))){
+            var sheets=(org.apache.poi.xssf.eventusermodel.XSSFReader.SheetIterator)new org.apache.poi.xssf.eventusermodel.XSSFReader(pkg).getSheetsData();
+            while(sheets.hasNext())try(var input=sheets.next()){
+                if(!wanted.contains(sheets.getSheetName()))continue;
+                var cells=new java.util.HashMap<String,java.math.BigDecimal>();out.put(sheets.getSheetName(),cells);
+                var events=xml.createXMLStreamReader(input);String address="",type="",value="";
+                while(events.hasNext()){
+                    int event=events.next();if(event==javax.xml.stream.XMLStreamConstants.START_ELEMENT){
+                        if(events.getLocalName().equals("c")){address=events.getAttributeValue(null,"r");type=java.util.Objects.toString(events.getAttributeValue(null,"t"),"");value="";}
+                        else if(events.getLocalName().equals("v"))value=events.getElementText();
+                    }else if(event==javax.xml.stream.XMLStreamConstants.END_ELEMENT&&events.getLocalName().equals("c")&&!value.isBlank()&&(type.isEmpty()||type.equals("n")))cells.put(address,new java.math.BigDecimal(value));
+                }events.close();
+            }
+        }assertEquals(wanted,out.keySet());return out;
     }
     @Test void unknownPopulatedSettlementHeaderBlocksInsteadOfSilentlyUsingListRate()throws Exception {
         try(var book=new XSSFWorkbook()) {
