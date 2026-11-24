@@ -1866,6 +1866,9 @@ public class LogisticsSourceParser {
                 c.discount=col;
             }
             var field=t.length()>60?"":aliases.firstMatch(provider,t,HEADER_FIELDS);
+            // An explicit net-price column must never silently fall back to list price.
+            if(provider.equals("顺丰") && !field.equals("settlementRate") && t.length()<=60
+                    && t.matches("(?i).*(折后|折扣后|结算).*(价|费|金额|RMB|CNY|元).*"))c.unknownSfSettlement.add(col);
             switch(field){
                 case "country"->c.country=col;case "countryCode"->c.countryCode=col;case "continent"->c.continent=col;case "channel"->c.channel=col;case "productCode"->c.code=col;
                 case "weightFrom"->{c.from=col;if(t.contains("克"))c.boundsInGrams=true;}case "weightTo"->{c.to=col;if(t.contains("克"))c.boundsInGrams=true;}
@@ -2308,6 +2311,12 @@ public class LogisticsSourceParser {
         return 12;
     }
     private void sfPrice(ObjectNode out,Source source,int r,Columns columns,ObjectNode channel) {
+        for(int col:columns.unknownSfSettlement)if(!sfPriceCellBlank(source.cell(r,col))) {
+            String label=source.text(columns.headerRow,col);
+            issue(channel,r+1,"pricePerKg","顺丰折后/结算价格列未识别："+label+"；禁止回退到原价或原价乘折扣","error");
+            out.put("sourceUnrecognizedSettlementCell",source.address(r,col)).put("sourceUnrecognizedSettlementHeader",label);
+            pending(out,"顺丰折后/结算价格列未识别");return;
+        }
         for(var entry:Map.of("OriginalRate",columns.rate,"Discount",columns.discount,"SettlementRate",columns.settlement).entrySet()) {
             if(entry.getValue()>=0)out.put("source"+entry.getKey(),source.text(r,entry.getValue()))
                     .put("source"+entry.getKey()+"Cell",source.address(r,entry.getValue()));
@@ -2485,7 +2494,7 @@ public class LogisticsSourceParser {
     private static Map<String,String> countries(){var m=new HashMap<String,String>();for(var code:Locale.getISOCountries())m.put(new Locale.Builder().setRegion(code).build().getDisplayCountry(Locale.SIMPLIFIED_CHINESE),code);m.put("英国","GB");m.put("韩国","KR");m.put("捷克","CZ");m.put("中国台湾","TW");m.put("台湾","TW");m.put("中国香港","HK");m.put("香港","HK");m.put("俄罗斯","RU");m.put("阿联酋","AE");m.put("土库曼","TM");m.putAll(Map.ofEntries(Map.entry("马其顿","MK"),Map.entry("刚果","CG"),Map.entry("圣基茨","KN"),Map.entry("圣尤斯特歇斯岛","BQ"),Map.entry("圣巴特勒米岛","BL"),Map.entry("塞拉里昂","SL"),Map.entry("安提瓜及巴布达","AG"),Map.entry("布维岛","BV"),Map.entry("瓦利斯群岛和富图纳群岛","WF"),Map.entry("科科斯群岛","CC"),Map.entry("科索沃","XK"),Map.entry("蒙特塞拉岛","MS"),Map.entry("西萨摩亚","WS"),Map.entry("阿森松","AC"),Map.entry("夏威夷","HI")));return m;}
     private static class Columns {
         int headerRow=-1,feeHeaderRow=-1,country=-1,countryCode=-1,continent=-1,channel=-1,code=-1,weight=-1,from=-1,to=-1,rate=-1,fee=-1,settlement=-1,minimum=-1,step=-1,origin=-1,zone=-1,eta=-1,linehaul=-1,firstPrice=-1,nextPrice=-1;
-        int discount=-1;boolean ambiguousSfPrice=false;List<Integer> fees=new ArrayList<>();
+        int discount=-1;boolean ambiguousSfPrice=false;List<Integer> fees=new ArrayList<>(),unknownSfSettlement=new ArrayList<>();
         double firstKg=0.5,nextKg=0.5;boolean boundsInGrams=false;String fixedWeight="";List<Integer> notes=new ArrayList<>();Set<String> blockingFeeHeaders=new LinkedHashSet<>();
     }
     private static boolean hasFirstNextValue(String value) {return !value.isBlank()&&!value.matches("0+(\\.0+)?|[-—/]");}
