@@ -5,8 +5,9 @@ import Editor from './BatchSingleSheetEditor.vue'
 import { mergeBatchSingle, type BatchSingleItem } from '@/services/batchSingleQuotation'
 import { batchSheetEditorSource } from '@/services/batchSingleSheetEditor'
 import { averageScope, type AveragePlan } from '@/data/quoteChannelAverage'
-import { quoteSheetTextTable } from '@/data/customerQuoteSheet'
+import { customerQuoteSheetHtml, customerQuoteSheetTsv, quoteSheetTextTable } from '@/data/customerQuoteSheet'
 import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
+import { compactQuoteTable } from '@/services/compactQuoteTable'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { buildQuotationWeightSnapshot } from '@/data/quotationWeightSnapshot'
 import { defaultWomensPricing, womensPricingSample } from '@/data/womensPricing'
@@ -411,4 +412,58 @@ it('automatically updates a whole batch when adding a third US route without lea
  expect(next.items.map(item=>item.input.customerQuote!.averagePlans![0]!.systemPrices)).toEqual([[7,13.67,20.33],[14,27.33,40.67]])
  expect(next.items.every(item=>item.sheet.rows[0]!.averageId)).toBe(true)
  expect(JSON.stringify(values)).toBe(original)
+})
+
+
+it('edits, copies and reopens independent SKU notes without changing prices or the original document', async () => {
+ const items = ['SKU-A','SKU-B','SKU-C'].map(item)
+ const notes = ['A original','B original','']
+ items.forEach((item, index) => {
+  item.input.customerQuote = { ...item.input.customerQuote!, sizeRules: notes[index], sizeRulesEnabled: true }
+  item.sheet.sizeRules = notes[index]
+ })
+ const original = mergeBatchSingle(items), before = JSON.stringify(original)
+ await mount(undefined, original)
+ const inputs = (sku: string) => [...document.querySelectorAll<HTMLTextAreaElement>(`[aria-label="${sku} 备注说明"]`)]
+ expect(document.querySelectorAll('.sheet-size-rules')).toHaveLength(6)
+ expect([...document.querySelectorAll('.sheet-size-rules')].every(cell => !cell.hasAttribute('rowspan'))).toBe(true)
+ expect(inputs('SKU-B').map(input => input.value)).toEqual(['B original','B original'])
+ inputs('SKU-A')[0]!.value = 'Box packaging\nHandle with care'
+ inputs('SKU-A')[0]!.dispatchEvent(new Event('input')); await nextTick()
+ expect(inputs('SKU-A')[1]!.value).toBe('Box packaging\nHandle with care')
+ inputs('SKU-B')[1]!.value = ''
+ inputs('SKU-B')[1]!.dispatchEvent(new Event('input')); await nextTick()
+ const search = document.querySelector<HTMLInputElement>('[aria-label="搜索报价单 SKU"]')!
+ search.value = 'SKU-C';search.dispatchEvent(new Event('input'));await nextTick()
+ inputs('SKU-C')[0]!.value = '=C & <fragile>'
+ inputs('SKU-C')[0]!.dispatchEvent(new Event('input'));await nextTick()
+ const saved = await editor.capture()
+ const expected = ['Box packaging\nHandle with care','','=C & <fragile>']
+ expect(saved.items.map(item => item.input.customerQuote!.sizeRules)).toEqual(expected)
+ expect(saved.items.map(item => item.input.sheetQuote!.sizeRules)).toEqual(expected)
+ expect(saved.items.map(item => item.sheet.sizeRules)).toEqual(expected)
+ expect(saved.sheet.rows.map(row => row.note)).toEqual(expected.flatMap(note => [note,note]))
+ expect(saved.items.map(item => item.input.customerQuote!.rows)).toEqual(original.items.map(item => item.input.customerQuote!.rows))
+ const html = customerQuoteSheetHtml(saved.sheet)
+ expect(html).not.toContain('rowspan=')
+ expect(html).toContain("'=C &amp; &lt;fragile&gt;")
+ expect(customerQuoteSheetTsv(saved.sheet)).toContain('Box packaging Handle with care')
+ const compact = compactQuoteTable(saved.sheet)
+ expect(compact.text).toContain('Box packaging Handle with care')
+ expect(compact.text).toContain("'=C & <fragile>")
+ expect(compact.text).not.toContain('A original');expect(compact.text).not.toContain('B original')
+ expect(JSON.stringify(original)).toBe(before)
+ app.unmount();document.body.innerHTML='';await mount(undefined, JSON.parse(JSON.stringify(saved)))
+ expect(inputs('SKU-B').every(input => input.value === '')).toBe(true)
+ expect((await editor.capture()).items.map(item => item.input.customerQuote!.sizeRules)).toEqual(expected)
+ // Hiding the column retains every SKU's draft for a later re-enable.
+ document.querySelector<HTMLInputElement>('[aria-label="显示备注列"]')!.click();await nextTick()
+ const hidden = await editor.capture()
+ expect(hidden.items.every(item => item.input.customerQuote!.sizeRulesEnabled === false)).toBe(true)
+ expect(hidden.items.map(item => item.input.customerQuote!.sizeRules)).toEqual(expected)
+ expect(quoteSheetTextTable(hidden.sheet)[0]).not.toContain('Note')
+ expect(compactQuoteTable(hidden.sheet).text).not.toContain('Box packaging')
+ app.unmount();document.body.innerHTML='';await mount(undefined, JSON.parse(JSON.stringify(hidden)))
+ document.querySelector<HTMLInputElement>('[aria-label="显示备注列"]')!.click();await nextTick()
+ expect((await editor.capture()).items.map(item => item.input.customerQuote!.sizeRules)).toEqual(expected)
 })

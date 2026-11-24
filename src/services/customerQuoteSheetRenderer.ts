@@ -118,7 +118,8 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
   const { width, right, columns, cells, priceIndex } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0, sheet.columnOrder, typeof sheet.sizeRules === 'string', sheet.showQuantityRange)
   const priceStart = columns[priceIndex]
   const priceEnd = columns[priceIndex + sheet.quantityLabels.length]
-  const valuesFor = (row: CustomerQuoteSheet['rows'][number]) => cells.map(column => column.key === 'product' || column.key === 'sizeRules' ? '' : column.key === 'prices' ? quoteSheetUsd(row.prices[column.priceIndex]) : quoteSheetCell(row, column.key))
+  const rowNotes = sheet.rows.some(row => row.note !== undefined)
+  const valuesFor = (row: CustomerQuoteSheet['rows'][number]) => cells.map(column => column.key === 'product' ? '' : column.key === 'sizeRules' ? (rowNotes ? row.note ?? '' : '') : column.key === 'prices' ? quoteSheetUsd(row.prices[column.priceIndex]) : quoteSheetCell(row, column.key))
   const boldCell = (index: number) => cells[index].key === 'number' || cells[index].key === 'prices'
   if (sheet.rows.some(row => row.prices.length !== sheet.quantityLabels.length)) throw new Error('价格数量与表头不一致，请重新预览')
   const noteTexts = sheet.notes ?? [...CUSTOMER_QUOTE_NOTES]
@@ -152,7 +153,7 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     const photoHeight = photos.length ? photoRows * (photoSize + 12) + 12 : 0
     const sizeRulesIndex = cells.findIndex(column => column.key === 'sizeRules')
     font(context)
-    const rulesHeight = sizeRulesIndex < 0 ? 0 : lines(context, sheet.sizeRules ?? '', cells[sizeRulesIndex].width - 20).length * 26 + 20
+    const rulesHeight = sizeRulesIndex < 0 || rowNotes ? 0 : lines(context, sheet.sizeRules ?? '', cells[sizeRulesIndex].width - 20).length * 26 + 20
     const extraHeight = Math.max(0, Math.max(photoHeight, rulesHeight) - heights.reduce((sum, height) => sum + height, 0))
     heights.forEach((height, index) => { heights[index] = height + extraHeight / heights.length })
     const tableBottom = tableTop + heights.reduce((sum, height) => sum + height, 0)
@@ -242,7 +243,7 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       context.lineWidth = 1
       context.beginPath(); context.moveTo(22, y - 0.5); context.lineTo(right, y - 0.5); context.stroke()
     })
-    if (sizeRulesIndex >= 0) {
+    if (sizeRulesIndex >= 0 && !rowNotes) {
       const left = columns[sizeRulesIndex], right = columns[sizeRulesIndex + 1]
       context.fillStyle = '#fff'
       context.fillRect(left, tableTop, right - left, tableBottom - tableTop - 1)

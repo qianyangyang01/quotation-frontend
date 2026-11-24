@@ -24,7 +24,7 @@ export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
   { key: 'processingTime', label: 'Processing Time', name: '处理时间', width: 220 },
 ] as const
 export type QuoteSheetOptionalColumn = typeof QUOTE_SHEET_OPTIONAL_COLUMNS[number]['key']
-export type QuoteSheetEdits = { showAustraliaZones?: boolean; sizeRules?: string | null; sizeRulesEnabled?: boolean; agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[]; whatsapp?: string; columnOrder?: QuoteSheetColumnKey[]; countryFormat?: QuoteSheetCountryFormat }
+export type QuoteSheetEdits = { skuNotes?: Record<string, string>; showAustraliaZones?: boolean; sizeRules?: string | null; sizeRulesEnabled?: boolean; agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[]; whatsapp?: string; columnOrder?: QuoteSheetColumnKey[]; countryFormat?: QuoteSheetCountryFormat }
 export const QUOTE_SHEET_COLUMN_ORDER = ['number', 'product', 'sku', 'sizeRules', 'prices', 'country', 'provider', 'shippingTime', 'processingTime'] as const
 export type QuoteSheetColumnKey = typeof QUOTE_SHEET_COLUMN_ORDER[number]
 export function normalizeQuoteSheetOrder(order: readonly QuoteSheetColumnKey[] = []) {
@@ -61,7 +61,7 @@ export function quoteSheetTextTable(sheet: CustomerQuoteSheet) {
   const groups = quoteSheetRenderGroups(sheet.hiddenColumns, sheet.columnOrder, false, typeof sheet.sizeRules === 'string', sheet.showQuantityRange).filter(column => column.key !== 'product')
   return [
     groups.flatMap(column => column.key === 'prices' ? sheet.quantityLabels.map(label => `${label} (USD)`) : [column.key === 'sku' ? sheet.skuLabel ?? column.label : column.label]),
-    ...sheet.rows.map((row, index) => groups.flatMap(column => column.key === 'product' ? [] : column.key === 'prices' ? row.prices.map(quoteSheetUsd) : [column.key === 'sizeRules' ? (index === 0 ? sheet.sizeRules ?? '' : '') : quoteSheetCell(row, column.key)])),
+    ...sheet.rows.map((row, index) => groups.flatMap(column => column.key === 'product' ? [] : column.key === 'prices' ? row.prices.map(quoteSheetUsd) : [column.key === 'sizeRules' ? (row.note ?? (index === 0 ? sheet.sizeRules ?? '' : '')) : quoteSheetCell(row, column.key)])),
   ]
 }
 export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColumn[] = []) {
@@ -80,6 +80,7 @@ export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: num
 export const MAX_QUOTE_SHEET_COLUMNS = 10
 export function validQuoteSheetQuantity(value: number) { return Number.isSafeInteger(value) && value > 0 }
 export type CustomerQuoteSheetRow = {
+  note?: string
   quantityRange?: string
   region?: string; regionTranslationRequired?: boolean
   key: string; number: number | string; averageId?: string; sku?: string; country: string; provider: string; shippingTime: string; processingTime?: string
@@ -315,6 +316,7 @@ export function buildCustomerQuoteSheet(input: {
       return value != null && Number.isFinite(value) && value >= 0 ? value : null
     })
     return {
+      ...(input.edits.skuNotes ? { note: input.edits.skuNotes[row.sku || sku] ?? '' } : {}),
       key, number, sku: row.sku || sku, country: country || '—', region, regionTranslationRequired, provider: provider || '—', shippingTime, processingTime, prices,
       sourceDescription: [row.country, row.quoteRegion, row.carrier, row.transport, row.channelCode].filter(Boolean).join(' · '),
     }
@@ -346,11 +348,11 @@ export function customerQuoteSheetTsv(sheet: CustomerQuoteSheet) {
   return quoteSheetTextTable(sheet).map(row => row.map(cell).join('\t')).join('\r\n')
 }
 
-/** Rich clipboard format preserves the single merged notes cell in Excel/WPS. */
+/** Single-product notes stay merged; batch SKU notes stay with each row. */
 export function customerQuoteSheetHtml(sheet: CustomerQuoteSheet) {
   customerQuoteSheetTsv(sheet) // Apply the same validation as the plain-text fallback.
   const table = quoteSheetTextTable(sheet)
-  const rulesIndex = table[0].indexOf('Note')
+  const rulesIndex = sheet.rows.some(row => row.note !== undefined) ? -1 : table[0].indexOf('Note')
   const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const text = (value: string) => escape(/^[=+@-]/.test(value.trim()) ? "'" + value : value).replace(/\r?\n/g, '<br>')
   return '<table><thead><tr>' + table[0].map(label => '<th>' + escape(label) + '</th>').join('') + '</tr></thead><tbody>' +

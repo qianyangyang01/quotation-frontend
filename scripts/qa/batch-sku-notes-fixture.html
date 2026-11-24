@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>批量 SKU 独立备注 · 本地验收</title>
+<style>body{font-family:Arial,'Microsoft YaHei',sans-serif;background:#f4f6f8;margin:0;color:#202532}header{background:white;padding:20px 28px;border-bottom:3px solid #ff8120}h1{font-size:22px;margin:0 0 8px}header p{margin:0;color:#805c2d}main{margin:20px;background:white;padding:20px;border:1px solid #dce3ea;border-radius:10px}</style>
+<header><h1>批量 SKU 独立备注 · 本地验收</h1><p>以下为隔离示例数据，不用于业务报价。不同 SKU 分别填写备注，保存后按各自商品保留。</p></header><main id="app"></main>
+<script type="module">
+import {createApp,h,ref} from 'vue'
+import Editor from '/src/components/quotation/BatchSingleSheetEditor.vue'
+import {mergeBatchSingle} from '/src/services/batchSingleQuotation.ts'
+import {authState} from '/src/data/authStore.ts'
+const nativeFetch=window.fetch.bind(window)
+window.fetch=(input,options)=>{const url=typeof input==='string'?input:input.url;if(url.includes('/api/'))throw new Error('本地示例禁止访问业务接口');return nativeFetch(input,options)}
+authState.current={id:'local-sku-notes',name:'Local QA',account:'LOCALQA',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''}
+authState.permissions=['quote','purchase','logistics','finance'];authState.initialized=true
+const notes=['Box packaging','Bag packaging','No additional packaging']
+function item(sku,index){
+ const options=[{id:'a',quoteSheetKey:'a',country:'US',carrier:'Yanwen',channel:'燕文示例渠道',rule:'test',eta:'6-12 working days',quote1Usd:7.9+index,quote2Usd:11.8+index,quote3Usd:15.55+index,quoteCustomUsd:null}]
+ const snapshot={quantities:[1,2,3],rows:options.map(o=>({optionId:o.id,prices:[o.quote1Usd,o.quote2Usd,o.quote3Usd]})),sizeRules:notes[index],sizeRulesEnabled:true}
+ return {input:{quoteMode:'single',primarySku:sku,customerName:'本地示例客户',customerGrade:'NEW',exchangeRate:6.7,commissionThreshold:1,quoteOptions:options,customerQuote:snapshot,systemQuantityQuotes:snapshot},conditions:{},sheet:{agent:'Local QA',date:'24 Nov 2026',quantityLabels:['1 pc','2 pcs','3 pcs'],sizeRules:notes[index],columnOrder:['number','sku','sizeRules','country','prices','provider','shippingTime','processingTime'],issues:[],rows:options.map((o,i)=>({key:o.id,sku,number:i+1,country:'United States',provider:'Yanwen',shippingTime:'6-12 working days',prices:snapshot.rows[i].prices,sourceDescription:''}))}}
+}
+window.demoDocument=mergeBatchSingle(['BK2602299','BK2602299-1','BK2602299-2'].map(item))
+const editor=ref()
+window.captureLocal=()=>editor.value.capture()
+createApp({render:()=>h(Editor,{ref:editor,document:window.demoDocument})}).mount('#app')
+</script></html>

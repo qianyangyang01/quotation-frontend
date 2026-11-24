@@ -69,6 +69,11 @@ export function batchItemLabel(item: Pick<BatchSingleItem, 'input' | 'entryId'>)
   return shippingEntryLabel(item.entryId || '', item.input.manualPricing?.weightGrams || 0, item.input.shippingNote || '')
 }
 export function shippingEntryLabel(id: string, grams: number, note: string) { return id + ' · ' + grams + 'g' + (note.trim() ? ' · ' + note.trim() : '') }
+/** The current per-product snapshot wins, including an explicitly cleared note. */
+export function batchItemNote(item: Pick<BatchSingleItem, 'input' | 'sheet'>): string {
+  const snapshot = item.input.customerQuote ?? item.input.sheetQuote
+  return (snapshot?.sizeRules !== undefined ? snapshot.sizeRules : item.sheet.sizeRules) ?? ''
+}
 export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument { return mergeBatchItems(items, false) }
 export function mergeBatchShipping(items: BatchSingleItem[]): BatchSingleDocument { return mergeBatchItems(items, true) }
 function mergeBatchItems(items: BatchSingleItem[], shipping: boolean): BatchSingleDocument {
@@ -96,7 +101,7 @@ function mergeBatchItems(items: BatchSingleItem[], shipping: boolean): BatchSing
       const members = source ? options.filter(option => scope(option) === scope(source)).map(option => (option as { quoteSheetKey?: string }).quoteSheetKey ?? option.id) : plan.members.map(member => member.optionId)
       return { key: item.sheet.rows.find(row => row.averageId === plan.id)!.key, members }
     }))
-    return orderQuoteRows(item.sheet.rows, order, row => row.key).map(row => ({ ...row, prices: [...row.prices], key: `${index}:${row.key}`, sku: batchItemLabel(item) }))
+    return orderQuoteRows(item.sheet.rows, order, row => row.key).map(row => ({ ...row, prices: [...row.prices], key: `${index}:${row.key}`, sku: batchItemLabel(item), ...(!shipping ? { note: batchItemNote(item) } : {}) }))
   }).map((row, index) => ({ ...row, number: index + 1 }))
   if (sheet.rows.length > 500) throw new Error('合并报价最多500条渠道明细，请减少 SKU 或渠道')
   return JSON.parse(JSON.stringify({ schemaVersion: 1, customerName: first.input.customerName, items, sheet }))

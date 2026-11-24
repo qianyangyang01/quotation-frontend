@@ -85,7 +85,7 @@ export function compactQuoteTable(sheet: CustomerQuoteSheet, photos: readonly Co
     for(let j=i;j<end;j++){
       const row=sheet.rows[j]!, isFirst=j===i, bg=j%2?'#fff2e9':'#ffffff'
       const prices=row.prices.map(value=>value==null?'—':value.toFixed(2))
-      const value = (key: Exclude<Group, 'prices'>) => key === 'sku' ? (isFirst ? row.sku ?? '' : '') : key === 'product' ? '' : key === 'sizeRules' ? (isFirst ? sheet.sizeRules ?? '' : '') : key === 'provider' ? channelLabel(row.provider, row.averageId ? undefined : sourceByKey.get(row.key)) : quoteSheetCell(row, key)
+      const value = (key: Exclude<Group, 'prices'>) => key === 'sku' ? (isFirst ? row.sku ?? '' : '') : key === 'product' ? '' : key === 'sizeRules' ? (isFirst && typeof sheet.sizeRules === 'string' ? row.note ?? sheet.sizeRules : '') : key === 'provider' ? channelLabel(row.provider, row.averageId ? undefined : sourceByKey.get(row.key)) : quoteSheetCell(row, key)
       textRows.push([...metadataValues.map(plain), ...groups.flatMap(key => key === 'prices' ? prices : [plain(value(key))])])
       const cells = groups.map(key => {
         if (key === 'prices') return prices.map((price,k)=>row.prices[k]==null?cell(price,115):`<td width="115" x:num="${price}" style='${style}width:86.25pt;mso-number-format:"0.00";font-weight:bold'>${price}</td>`).join('')
