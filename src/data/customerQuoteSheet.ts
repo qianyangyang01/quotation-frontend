@@ -283,8 +283,12 @@ export function buildCustomerQuoteSheet(input: {
     const fields = input.edits.fields?.[key] || {}
     const country = formatQuoteSheetCountry(fields.country ?? row.country, input.countries, input.edits.countryFormat)
     const translatedRegion = quoteSheetRegion(row.quoteRegion, row.country, input.countries)
-    const hideRegion = input.edits.showAustraliaZones === false && formatQuoteSheetCountry(row.country, input.countries, 'code') === 'AU'
-    const region = hideRegion ? '' : fields.region?.trim() ?? translatedRegion ?? ''
+    const displayRegion = fields.region?.trim() ?? translatedRegion ?? ''
+    // Battery is a route attribute, not a geographic zone. Hide this badge in
+    // the customer-facing sheet only; keep source regions and row keys intact.
+    const hideRegion = /^(?:带电|with battery)$/i.test(displayRegion)
+      || (input.edits.showAustraliaZones === false && formatQuoteSheetCountry(row.country, input.countries, 'code') === 'AU')
+    const region = hideRegion ? '' : displayRegion
     const regionTranslationRequired = !hideRegion && (translatedRegion === null || !!translatedRegion)
     if (visible('country') && (regionTranslationRequired && !region || /[^\x20-\x7e]/.test(region))) tableIssues.push(`第 ${index + 1} 行分区请填写英文，例如 Zone 2：${row.quoteRegion}`)
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''

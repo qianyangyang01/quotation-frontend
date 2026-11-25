@@ -40,6 +40,34 @@ beforeEach(()=>{
   vi.stubGlobal('isSecureContext',true);vi.stubGlobal('navigator',{clipboard:{writeText:vi.fn().mockResolvedValue(undefined)}})
 })
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.restoreAllMocks();vi.unstubAllGlobals()})
+it('copies both saved bundle photos as one complete cell image with unchanged saved prices', async () => {
+  const savedPhotos = [photo('blob:pen'), photo('blob:canvas')]
+  for (const item of savedPhotos) Object.defineProperties(item.image, { naturalWidth: { value: 800 }, naturalHeight: { value: 800 } })
+  vi.mocked(loadSavedQuoteSheetPhotos).mockResolvedValue(savedPhotos)
+  const drawImage = vi.fn()
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage, fillRect: vi.fn() } as unknown as CanvasRenderingContext2D)
+  vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,AAAA')
+  const write = vi.fn().mockResolvedValue(undefined)
+  Object.assign(navigator.clipboard, { write })
+  vi.stubGlobal('ClipboardItem', class { constructor(public items: Record<string, Blob>) {} })
+  const saved: CustomerPriceSnapshot = { quantities: [1], rows: [{ optionId: 'a', prices: [12] }, { optionId: 'b', prices: [13] }], photos: [
+    { assetId: '11111111-2222-3333-4444-555555555555', name: 'pen.png' },
+    { assetId: '11111111-2222-3333-4444-666666666666', name: 'canvas.png' },
+  ] }
+  const before = JSON.stringify(saved)
+  mount(document.body, saved); await settle()
+  const prices = exposed.capturePrices()
+  await click('复制图文表格')
+  expect(write).toHaveBeenCalledTimes(1)
+  const host = document.createElement('div')
+  host.innerHTML = await write.mock.lastCall![0][0].items['text/html'].text()
+  expect(host.querySelectorAll('img')).toHaveLength(1)
+  expect(host.querySelector('img')!.getAttribute('height')).toBe('292')
+  expect(drawImage.mock.calls.map(call => call[0])).toEqual(savedPhotos.map(item => item.image))
+  expect(exposed.capturePrices()).toEqual(prices)
+  expect(JSON.stringify(saved)).toBe(before)
+  expect(document.body.textContent).toContain('图文表格已复制')
+})
 it('saves only durable image references with the quote, retaining a hidden image choice', async () => {
   mount(); await select()
   const refs=[{assetId:'11111111-2222-3333-4444-555555555555',name:'sample.png'}]

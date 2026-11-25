@@ -32,6 +32,37 @@ function channelLabel(provider: string, source?: QuoteSheetSourceRow) {
 }
 /** Embed decoded, locally owned photos: no expiring URLs or asset uploads. */
 export function compactTablePhotos(photos: readonly QuoteLocalPhoto[]): CompactPhoto[] {
+  // Spreadsheet paste may keep only the first <img> in a cell. Flatten the
+  // ordered product photos into one PNG before building that cell, retaining
+  // editable text/prices and leaving the original photos/snapshots untouched.
+  if (photos.length > 1) {
+    const layouts = photos.map(photo => {
+      const width = photo.image.naturalWidth, height = photo.image.naturalHeight
+      if (!width || !height) throw new Error('商品图片尚未读取完成，请重试')
+      const scale = Math.min(1, 140 / Math.max(width, height))
+      return { image: photo.image, width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
+    })
+    const width = Math.max(...layouts.map(photo => photo.width))
+    const gap = 12, resolution = 640 / 140
+    const height = layouts.reduce((sum, photo) => sum + photo.height, 0) + gap * (layouts.length - 1)
+    const pixelGap = Math.round(gap * resolution)
+    const canvas = document.createElement('canvas')
+    try {
+      canvas.width = Math.round(width * resolution)
+      canvas.height = layouts.reduce((sum, photo) => sum + Math.round(photo.height * resolution), 0) + pixelGap * (layouts.length - 1)
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('当前浏览器无法读取商品图片')
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      let top = 0
+      for (const photo of layouts) {
+        const pixelWidth = Math.round(photo.width * resolution), pixelHeight = Math.round(photo.height * resolution)
+        context.drawImage(photo.image, Math.round((canvas.width - pixelWidth) / 2), top, pixelWidth, pixelHeight)
+        top += pixelHeight + pixelGap
+      }
+      return [{ dataUrl: canvas.toDataURL('image/png'), width, height }]
+    } finally { canvas.width = 0; canvas.height = 0 }
+  }
   return photos.map(photo => {
     const width = photo.image.naturalWidth, height = photo.image.naturalHeight
     if (!width || !height) throw new Error('商品图片尚未读取完成，请重试')

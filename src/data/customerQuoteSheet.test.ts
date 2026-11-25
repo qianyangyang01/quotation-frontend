@@ -16,6 +16,19 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it.each([undefined, 'With Battery', '带电'])('hides the battery badge from country output, including restored labels: %s', restored => {
+    const rows = [source({ quoteRegion: '美国带电' }), source({ country: '澳大利亚', quoteRegion: '澳大利亚2区' })]
+    const draft = edits()
+    if (restored) draft.fields = { [quoteSheetRowKey(rows[0])]: { region: restored } }
+    const before = JSON.stringify({ rows, draft })
+    const sheet = buildCustomerQuoteSheet({ rows, countries: [], edits: draft, quantities: [1, 2, 3], customQuantity: 3, bundle: false })
+    expect(sheet.rows[0]).toMatchObject({ country: 'United States', region: '', regionTranslationRequired: false, key: quoteSheetRowKey(rows[0]), prices: [12.8, 20.5, 28.2] })
+    expect(sheet.rows[1].region).toBe('Zone 2')
+    expect(sheet.issues).toEqual([])
+    expect(customerQuoteSheetTsv(sheet)).not.toMatch(/With Battery|带电/)
+    expect(sheet.rows[0].sourceDescription).toContain('美国带电')
+    expect(JSON.stringify({ rows, draft })).toBe(before)
+  })
   it('exports saved Qiaojie and tax-included routes without changing their prices or identities', () => {
     const rows = [source({ country: 'AU', carrier: '巧捷', quoteRegion: '澳大利亚3区', quote1: 5.55 }),
       source({ country: 'NZ', carrier: '极通环球', quoteRegion: '含税', channelKey: 'tax-included', quote1: 8.55 })]
