@@ -103,12 +103,20 @@ public final class FobPricing {
                     invalid("普通FOB含票价与最低起订档采购价、原票点不匹配");
             }
             if(included && anchor!=null && anchor.compareTo(base)!=0)invalid("普通FOB含票价与已含票的最低起订档不匹配");
+            // Already-included prices incur no extra tax. Report the source point,
+            // when known, instead of displaying the unrelated 10-point fallback.
+            boolean knownIncludedPoint = included && raw.path("taxPoint").isNumber()
+                && Double.isFinite(raw.path("taxPoint").asDouble())
+                && raw.path("taxPoint").decimalValue().signum() >= 0
+                && raw.path("taxPoint").decimalValue().compareTo(BigDecimal.ONE) <= 0;
+            if (knownIncludedPoint) point = raw.path("taxPoint").decimalValue();
             var factor=included?BigDecimal.ONE:BigDecimal.ONE.add(point);
             policy.put("mode",included?"included":anchor!=null?"ordinary-invoice-tax-point":"ordinary-fixed-ticket").put("fobInvoiceRatio",factor)
                 .put("baseIncludedCny",included?base:anchor!=null?anchor:base.multiply(factor)).put("effectiveTaxPoint",point)
                 .put("verificationRequired",false).put("ruleSource",anchor!=null?"ordinary-included-price":"ordinary-original-rule")
                 .put("basisLabel",anchor!=null?"按原含票价核对最低起订档；其他档按原票点计价":"未填含票价，沿用普通FOB原10点规则");
             if(anchor!=null)policy.put("sourceIncludedCny",anchor);
+            if(included && !knownIncludedPoint)policy.remove("effectiveTaxPoint");
             return;
         }
         boolean missingType=missingInvoice(raw),missingPoint=missingTaxPoint(raw);

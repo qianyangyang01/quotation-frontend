@@ -25,6 +25,7 @@ class FobLegacyPurchaseTest {
     @Test void includedLegacyCostAndFreightAreUsedOnceWithoutChangingProcurement() {
         var raw = source(); var before = raw.deepCopy();
         var product = product(raw, "ordinary-fob");
+        assertEquals(.01, product.at("/invoicePricing/effectiveTaxPoint").asDouble());
         var config = FobQuotation.object().put("version", 0); config.set("value", FobPricing.defaults());
         var pricing = FobPricing.pricing(product, new BigDecimal("6.63"), config);
         assertEquals(4.04, pricing.at("/rows/0/taxIncludedCny").asDouble());
@@ -33,6 +34,10 @@ class FobLegacyPurchaseTest {
         assertEquals("0.77", pricing.at("/rows/0/declaredUsd").asText());
         assertEquals(before, raw);
         assertThrows(AppException.class, () -> FobQuotation.standard(raw));
+        var unknownPoint = raw.deepCopy(); unknownPoint.remove("taxPoint");
+        var unknown = product(unknownPoint, "ordinary-fob");
+        assertFalse(unknown.path("invoicePricing").has("effectiveTaxPoint"));
+        assertEquals(0, new BigDecimal("4.04").compareTo(FobPricing.purchaseCost(unknown, new BigDecimal("4.04"))));
     }
     @Test void eligibilityDoesNotBypassInvoiceValidationForAnyClass() {
         for (var kind : List.of("rebate-fob", "rebate-cfr-cif")) {
