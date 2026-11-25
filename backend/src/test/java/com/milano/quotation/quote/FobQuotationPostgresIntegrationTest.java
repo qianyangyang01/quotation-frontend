@@ -28,6 +28,34 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
 class FobQuotationPostgresIntegrationTest {
     @Autowired com.milano.quotation.purchase.PurchaseProductService standardPurchases;
+    @Test void legacyIncludedPurchaseSavesAndReadsBackWithoutRepricingHistoryOrChangingSource() throws Exception {
+        var sku = "LEGACY-FOB-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        var source = FobLegacyPurchaseTest.source().put("sku", sku);
+        var procurement = standardPurchases.upsert(source);
+        var beforePurchase = standardPurchases.get(sku).deepCopy();
+        var selected = fobQuotation.classifiedProduct(sku, "auto", "ordinary-fob");
+        assertEquals("standard", selected.path("source").asText());
+        assertEquals(4.04, selected.at("/pricing/rows/0/taxIncludedCny").asDouble());
+        assertEquals(.21, selected.at("/pricing/rows/0/freightCny").asDouble());
+        var request = input.deepCopy(); var snapshot = (ObjectNode) request.path("fob");
+        snapshot.set("product", selected); snapshot.put("quantity", 1000).put("displayMode", "quantity");
+        var sheet = (ObjectNode) snapshot.path("sheet"); sheet.putArray("quantityLabels").add("Unit Price");
+        sheet.putArray("rows").addObject().put("key", sku + "-0").putArray("prices").add(.76);
+        var key = UUID.randomUUID().toString(); var quote = save("employee", key, request);
+        var id = quote.path("id").asText(); assertEquals(id, save("employee", key, request).path("id").asText());
+        var loaded = read("employee", id);
+        assertEquals("legacy_2026", loaded.at("/fob/sourceSnapshot/dataSource").asText());
+        assertEquals("tax_included", loaded.at("/fob/sourceSnapshot/purchasePriceBasis").asText());
+        assertEquals(4.04, loaded.at("/fob/sourceSnapshot/purchasePriceCny").asDouble());
+        assertEquals(beforePurchase, standardPurchases.get(sku));
+        var changed = ((ObjectNode) procurement.deepCopy()).put("taxIncludedPriceCny", 5.05);
+        standardPurchases.upsert(changed);
+        assertEquals(5.05, fobQuotation.classifiedProduct(sku, "auto", "ordinary-fob").at("/pricing/rows/0/taxIncludedCny").asDouble());
+        assertEquals(loaded, read("employee", id));
+        mvc.perform(post("/api/v1/quotations").session(sessions.get("employee")).with(csrf())
+            .header("Idempotency-Key", UUID.randomUUID().toString()).contentType("application/json").content(request.toString()))
+            .andExpect(status().isConflict());
+    }
     @Test void newSpecialFieldsDriveAutoLookupAndSaveWhileHistoryRemainsAnExactSnapshot() throws Exception {
         var source=mapper.createObjectNode().put("sku","FOB-SAVE").put("dataSource","standard").put("skuOrigin","manual")
             .put("weightG",60).put("minOrderQty",1).put("purchasePriceCny",7.2).put("freeShipping","是")

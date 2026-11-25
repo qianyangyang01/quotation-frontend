@@ -183,9 +183,26 @@ public class FobQuotation {
     }
     static ObjectNode standard(JsonNode raw) { return standard(raw,false); }
     static ObjectNode standard(JsonNode raw,boolean classified) {
-        if (!"standard".equals(raw.path("dataSource").asText()) || !"ready".equals(raw.path("catalogState").asText())
-            || "system".equals(raw.path("skuOrigin").asText()) || !classified && "tax_included".equals(raw.path("purchasePriceBasis").asText()))
-            throw AppException.unprocessable("该新采购资料不满足FOB报价条件");
+        boolean legacy = "legacy_2026".equals(raw.path("dataSource").asText());
+        // Classified pricing understands already-included costs. Keep the historical
+        // unclassified path unchanged, and never rewrite the procurement source/basis.
+        if (!"standard".equals(raw.path("dataSource").asText()) && !(classified && legacy))
+            throw AppException.unprocessable("该采购来源暂不支持此FOB报价方式，请使用当前三类FOB报价入口");
+        if (!"ready".equals(raw.path("catalogState").asText()))
+            throw AppException.unprocessable("采购资料尚未转正式或已停用，不能进行FOB报价");
+        if ("system".equals(raw.path("skuOrigin").asText()))
+            throw AppException.unprocessable("请先确认正式SKU，再进行FOB报价");
+        if (legacy && !raw.path("quoteReady").asBoolean()) {
+            var reasons = new ArrayList<String>();
+            for (var reason : raw.path("quotationBlockingReasons")) reasons.add(reason.asText());
+            throw AppException.unprocessable("旧采购资料尚未满足报价条件" + (reasons.isEmpty() ? "，请采购核实" : "，请补齐：" + String.join("、", reasons)));
+        }
+        if (!classified && "tax_included".equals(raw.path("purchasePriceBasis").asText()))
+            throw AppException.unprocessable("已含票采购价请使用当前三类FOB报价入口，避免重复加票点");
+        if (!raw.path("minOrderQty").isIntegralNumber() || raw.path("minOrderQty").asLong() < 1)
+            throw AppException.unprocessable("采购资料缺少有效起订量（须为正整数）");
+        if (!raw.path("purchasePriceCny").isNumber())
+            throw AppException.unprocessable("采购资料缺少有效的起订档采购价");
         var parsed=object().put("minOrderQty",count(raw.path("minOrderQty"))).put("orderMultiple",1);
         var candidates=new ArrayList<ObjectNode>();
         for (var pair:List.of(new String[]{"minOrderQty","purchasePriceCny"},new String[]{"tier2MinQty","tier2PriceCny"},new String[]{"tier3MinQty","tier3PriceCny"},new String[]{"tier4MinQty","tier4PriceCny"},new String[]{"tier5MinQty","tier5PriceCny"})) {
@@ -196,6 +213,8 @@ public class FobQuotation {
         candidates.sort(Comparator.comparingLong(n->n.path("minQty").asLong()));
         var tiers=parsed.putArray("priceTiers");
         for(int i=0;i<candidates.size();i++) {var row=candidates.get(i);if(i+1<candidates.size())row.put("maxQty",candidates.get(i+1).path("minQty").asLong()-1);else row.putNull("maxQty");tiers.add(row);}
+        if (!"是".equals(raw.path("freeShipping").asText()) && (!raw.path("freight100Cny").isNumber() || raw.path("freight100Cny").asDouble() < 0))
+            throw AppException.unprocessable("FOB报价需要有效的100件总运费；如确认包邮，请在采购资料中填写包邮");
         var freight="是".equals(raw.path("freeShipping").asText())?BigDecimal.ZERO:amount(raw.path("freight100Cny"));
         parsed.set("freight",object().put("quantity",100).put("totalFreightCny",freight).put("unitFreightCny",freight.movePointLeft(2)).put("estimated",false).put("basis","100件总运费 "+freight.toPlainString()+" ÷ 100"));
         return parsed;
