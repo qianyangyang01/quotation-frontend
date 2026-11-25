@@ -1,29 +1,19 @@
 {
-  "version": "quotation-2026.11.24-01-pricing",
-  "publishedOn": "2026-11-24",
+  "version": "quotation-2026.11.25-02-copy-photos",
+  "publishedOn": "2026-11-25",
   "policy": "optional",
   "requiredEpoch": "notice-v1",
-  "title": "报价精度与商品备注更新",
+  "title": "图文复制与国家标签修复",
   "features": [
     {
-      "title": "百州运费按实际金额计算",
-      "description": "取消百州运费凑整到人民币元，按实际计费金额保留到分。",
-      "location": "报价 · 百州美国渠道"
+      "title": "多张商品图完整复制",
+      "description": "复制图文表格时将商品图片按原顺序拼合，避免粘贴到表格后只保留第一张；文字和价格仍可编辑。",
+      "location": "报价单 · 复制图文表格"
     },
     {
-      "title": "小数计算更准确",
-      "description": "保留计算过程的小数精度，避免提前舍入影响最终报价；已有报价保留原记录。",
-      "location": "单品与批量报价"
-    },
-    {
-      "title": "顺丰折后金额识别修复",
-      "description": "正确读取原价表的折后金额，遇到未识别的结算价格列时阻止发布。",
-      "location": "物流价表 · 导入与审核"
-    },
-    {
-      "title": "每个商品独立填写备注",
-      "description": "批量 SKU 报价的备注分别编辑、保存，图片和复制表格保留对应内容。",
-      "location": "批量 SKU 报价 · 合并报价单"
+      "title": "国家下方去掉带电标签",
+      "description": "国家下方不再显示 With Battery，实际物流属性、计费和历史报价保持不变。",
+      "location": "报价单 · 国家"
     }
   ]
 }
