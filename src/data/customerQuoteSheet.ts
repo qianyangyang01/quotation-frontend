@@ -130,6 +130,7 @@ const providerNames: Record<string, string> = {
   '急速国际': 'Jisu International',
   '百洲': 'Baizhou', '百洲货运': 'Baizhou', baizhou: 'Baizhou',
   '中国邮政': 'China Post', '邮政': 'China Post', '中邮': 'China Post',
+  '无忧物流': 'AliExpress Standard Shipping',
   '菜鸟': 'Cainiao', '菜鸟物流': 'Cainiao', '菜鸟国际': 'Cainiao',
   '联邦快递': 'FedEx', fedex: 'FedEx', '敦豪': 'DHL', dhl: 'DHL', ups: 'UPS', '联合包裹': 'UPS',
 }

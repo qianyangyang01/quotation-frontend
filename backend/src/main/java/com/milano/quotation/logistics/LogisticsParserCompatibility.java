@@ -4,6 +4,7 @@ package com.milano.quotation.logistics;
 final class LogisticsParserCompatibility {
     static final String SEPTEMBER_29 = "wanbang-yanwen-express-2026.09.29-v3";
     private static final java.util.Set<String> REVIEWED_VERSIONS=java.util.Set.of(
+        "wuyou-brazil-general-2026.11.26-v30",
         "wanbang-specialb-sensitive-name-2026.11.21-v26", "yanwen-japan-first-next-2026.11.21-v27", "yunexpress-japan-first-next-2026.11.23-v28", "baizhou-actual-freight-2026.11.24-v29",
         "jitong-custom-minimum-2026.11.19-v25","baizhou-bz503-2026.11.16-v20","fanzhirun-us-2026.11.16-v21","sf-europe-bulky-2026.11.16-v22","fanzhirun-product-blocks-2026.11.18-v23","mutable-product-identities-2026.11.19-v24",
         "kuailv-us-sensitive-2026.11.10-v16","kuailv-us-special-line-2026.11.10-v17","kuailv-eu-special-2026.11.11-v18",

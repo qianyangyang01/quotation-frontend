@@ -58,12 +58,12 @@ export type FinanceChannelPolicy = {
   updatedAt: string
 }
 
-export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'NEW'
-export function customerGradeLabel(grade: string) { return grade === 'NEW' ? '新客户' : `${grade}级客户` }
+export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'NEW' | 'ALIEXPRESS_BR'
+export function customerGradeLabel(grade: string) { return grade === 'ALIEXPRESS_BR' ? '速卖通巴西报价' : grade === 'NEW' ? '新客户' : `${grade}级客户` }
 // Display names are independent of the legacy values used by saved quotations.
 export function customerGradeDisplayLabel(grade: string) {
   if (grade === 'E' || grade === 'E级客户') return '普通客户'
-  return /^(S|A|B|C|D|NEW)$/.test(grade) ? customerGradeLabel(grade) : grade
+  return /^(S|A|B|C|D|NEW|ALIEXPRESS_BR)$/.test(grade) ? customerGradeLabel(grade) : grade
 }
 export type CustomerGradeSetting = { grade: CustomerGrade; coefficient: number; enabled: boolean }
 export type FinanceExchangeRateSetting = { usdCny: number; eurUsd?: number; updatedAt: string }
@@ -83,6 +83,7 @@ const defaultGradeSettings: CustomerGradeSetting[] = [
   { grade: 'D', coefficient: 1.25, enabled: true },
   { grade: 'E', coefficient: 1.30, enabled: true },
   { grade: 'NEW', coefficient: 1.30, enabled: false },
+  { grade: 'ALIEXPRESS_BR', coefficient: 1.34, enabled: false },
 ]
 
 export function normalizeCustomerGradeSettings(settings: Partial<CustomerGradeSetting>[] | undefined): CustomerGradeSetting[] {

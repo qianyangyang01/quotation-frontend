@@ -49,8 +49,8 @@ it('lets finance configure and enable NEW independently, rejecting invalid input
   app=createApp({render:()=>h(Jerry,{mode:'members'})});app.mount(host)
   for(let i=0;i<8;i++){await Promise.resolve();await nextTick()}
   ;[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')].find(e=>e.textContent?.includes('客户系数'))!.click();await nextTick()
-  expect(host.querySelectorAll('.grade-grid>label')).toHaveLength(7)
-  const row=[...host.querySelectorAll('.grade-grid>label')].find(e=>e.textContent?.includes('新客户'))!
+  expect(host.querySelectorAll('#grade-coefficient-panel .grade-grid>label')).toHaveLength(7)
+  const row=[...host.querySelectorAll('#grade-coefficient-panel .grade-grid>label')].find(e=>e.textContent?.includes('新客户'))!
   const input=row.querySelector<HTMLInputElement>('input[type=number]')!
   const enabled=row.querySelector<HTMLInputElement>('input[type=checkbox]')!
   expect(input.value).toBe('1.27635');expect(enabled.checked).toBe(false)
@@ -83,6 +83,23 @@ it('shows failed grade saves, blocks duplicate submission and reads back the con
   expect(save.disabled).toBe(false)
   saveGrades.mockResolvedValueOnce(normalizeCustomerGradeSettings([{ grade: 'S', coefficient: 1.4, enabled: true }]))
   save.click(); await settle()
-  const row = [...host.querySelectorAll('.grade-grid>label')].find(e => e.querySelector('strong')?.textContent?.includes('S'))!
+  const row = [...host.querySelectorAll('#grade-coefficient-panel .grade-grid>label')].find(e => e.querySelector('strong')?.textContent?.includes('S'))!
   expect(row.querySelector<HTMLInputElement>('input[type=number]')!.value).toBe('1.4')
+})
+
+
+it('configures Brazil in its own tab and preserves existing grades in the same versioned save', async () => {
+  fixture.customerGrades = normalizeCustomerGradeSettings([{grade:'S',coefficient:1.21605,enabled:true}])
+  const host=document.createElement('div');document.body.append(host)
+  app=createApp({render:()=>h(Jerry,{mode:'members'})});app.mount(host)
+  for(let i=0;i<8;i++){await Promise.resolve();await nextTick()}
+  ;[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')].find(e=>e.textContent?.includes('客户系数'))!.click();await nextTick()
+  host.querySelector<HTMLButtonElement>('#brazil-coefficient-tab')!.click();await nextTick()
+  const panel=host.querySelector('#brazil-coefficient-panel')!
+  expect(panel.textContent).toContain('速卖通巴西报价')
+  expect(panel.querySelector<HTMLInputElement>('input[type=number]')!.value).toBe('1.34')
+  panel.querySelector<HTMLInputElement>('input[type=checkbox]')!.click();await nextTick()
+  panel.querySelector<HTMLButtonElement>('header button')!.click();await nextTick()
+  expect(saveGrades).toHaveBeenCalledOnce()
+  expect(saveGrades.mock.calls[0]![0]).toEqual(expect.arrayContaining([{grade:'ALIEXPRESS_BR',coefficient:1.34,enabled:true},{grade:'S',coefficient:1.21605,enabled:true}]))
 })

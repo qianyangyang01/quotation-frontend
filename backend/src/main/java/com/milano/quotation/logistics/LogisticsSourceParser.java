@@ -21,10 +21,10 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="baizhou-actual-freight-2026.11.24-v29";
+    public static final String VERSION="wuyou-brazil-general-2026.11.26-v30";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
-    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
+    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润","无忧物流");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG","分段进位KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
     private static final Pattern DATE_METADATA=Pattern.compile("(?i)^(?:(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?\\s*)?(?:19|20)\\d{2}\\s*[-/.年]\\s*\\d{1,2}\\s*[-/.月]\\s*\\d{1,2}\\s*日?(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?$");
@@ -60,6 +60,9 @@ public class LogisticsSourceParser {
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
                 var source=new Source(sheet,scope,book.formulaCells());
                 if(provider.isBlank())provider=providerFromTitles(source);
+                if(provider.equals("无忧物流")&&!sheet.getSheetName().trim().equals("无忧物流-标准")) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","用户限定：仅无忧物流-标准中的巴西小包普货；其他工作表保留原文件，不导入");continue;
+                }
                 if(provider.equals("帆之润")&&fanzhirunHeader(source)<0) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","帆之润按表内渠道名称、产品代码和货物属性识别小包价格区块；其他表保留原文件");continue;
                 }
@@ -117,7 +120,8 @@ public class LogisticsSourceParser {
                 var parsed=new LinkedHashMap<String,ObjectNode>();
                 boolean recognized=false;
                 try {
-                for(int r=0;r<=source.lastContentRow;r++) if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst()) && source.text(r,1).equals("国家简码")) {
+                if(provider.equals("无忧物流"))recognized=parseWuyouBrazil(source,filename,parsed);
+                for(int r=0;!recognized&&r<=source.lastContentRow;r++) if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst()) && source.text(r,1).equals("国家简码")) {
                     parseStandard(source,r,provider,filename,parsed); recognized=true; break;
                 }
                 if(!recognized&&provider.equals("捷易通达"))recognized=parseJieyitongda(source,filename,parsed);
@@ -518,6 +522,60 @@ public class LogisticsSourceParser {
         for(var limit:limits.entrySet())if(!previous.containsKey(limit.getKey())||previous.get(limit.getKey()).compareTo(BigDecimal.valueOf(limit.getValue()))!=0)
             issue(target,0,"限重","BZ503缺少国家或最高重量档发生变化："+limit.getKey(),"error");
         target.put("sourceNotes",String.join("\n",notes));
+        return true;
+    }
+
+    /** This adapter intentionally never falls back to the adjacent non-general/big-parcel tariffs. */
+    private boolean parseWuyouBrazil(Source source,String file,Map<String,ObjectNode> channels) {
+        var target=selected(source,"无忧物流","无忧物流-标准-巴西小包普货","",0,channels);
+        if(target==null)return true;
+        target.put("logisticsAttribute","普货");
+        var brazil=new ArrayList<Integer>();
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(source.text(r,2).equalsIgnoreCase("BR")||source.text(r,0).equals("巴西")||source.text(r,1).equalsIgnoreCase("Brazil"))brazil.add(r);
+            else source.filteredOtherRows.put(r,"范围限定：非巴西普货价格行或说明，不导入");
+        }
+        if(brazil.size()!=1){issue(target,0,"巴西价格","必须且只能识别一组巴西价格，禁止缺失或重复价格组","error");return true;}
+        int r=brazil.getFirst();source.parsedRows.add(r);
+        if(!source.text(r,0).equals("巴西")||!source.text(r,1).equalsIgnoreCase("Brazil")||!source.text(r,2).equals("BR"))
+            issue(target,r+1,"国家","巴西中英文名称和BR代码必须一致","error");
+        String billing=source.text(7,0),limits=source.text(8,0);
+        if(!clean(billing).contains("小包1g起重，按克计费")||!clean(limits).contains("小包普货计费")
+                ||!clean(limits).contains("不含有电池/非液体化妆品")||!clean(limits).contains("<=60cm")||!clean(limits).contains("长+宽+高<=90cm")
+                ||!clean(limits).replace("＜","<").contains("<=2kg"))
+            issue(target,9,"小包计费规则","原表小包1g计费、普货属性、2kg及60/90cm限制缺失或变化，须重新适配","error");
+        if(r<3||!source.text(r-3,3).equals("小包普货计费")||!source.text(r-3,11).equals("小包非普货计费"))
+            issue(target,r+1,"价格区块","小包普货/非普货表头位置变化，禁止猜测列归属","error");
+        String[] bands={"0~200g(含)","200~300g(含)","300~500g(含)","500~2000g(含)"};
+        double[] bounds={0,.2,.3,.5,2};
+        target.put("sourceNotes",billing+"\n"+limits+"\n仅巴西小包普货；其他国家、非普货、大包均排除。包裹尺寸须在发货前核对。");
+        for(int i=0;i<4;i++) {
+            int col=3+2*i;
+            if(!clean(source.text(r-2,col)).equals(bands[i])
+                    ||!clean(source.text(r-1,col)).equals("配送服务费元(RMB)/KG*每1g计重")
+                    ||!clean(source.text(r-1,col+1)).equals("挂号服务费元(RMB)/包裹"))
+                issue(target,r+1,"普货表头","重量档或费用单位变化："+source.address(r-2,col)+"，须重新适配","error");
+            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.MODEL)
+                    .put("areaName","巴西").put("countryCode","BR").put("zoneName","").put("originRegion","")
+                    .put("weightFromKg",bounds[i]).put("weightToKg",bounds[i+1]).put("weightFromInclusive",false).put("weightToInclusive",true)
+                    .put("minChargeWeightKg",.001).put("billingStepKg",.001).put("allowedMarks","普货").put("prohibitedMarks","带电、非液体化妆品")
+                    .put("prohibitGeneralCargo",false).put("volumetric",false).put("volumeDivisor",0).put("maxSideCm",60)
+                    .put("sourceMaxDimensionSumCm",90).put("notes",target.path("sourceNotes").asText())
+                    .put("sourceWeightRange",source.text(r-2,col)).put("sourceWeightCell",source.address(r-2,col))
+                    .put("sourceCountryCell",source.address(r,2)).put("sourcePriceCell",source.address(r,col))
+                    .put("sourceFeeCell",source.address(r,col+1)).put("sourceFeeLabel",source.text(r-1,col+1))
+                    .put("sourceMinimumWeightKind","note").put("sourceMinimumWeightCell",source.address(7,0))
+                    .put("sourceMinimumWeightText",billing).put("sourceRuleCell",source.address(8,0));
+            numeric(row,"pricePerKg",source,r,col,target,false);numeric(row,"registrationFee",source,r,col+1,target,false);
+            // Excel numbers have 15 significant digits; retain source evidence while removing binary serialization tails.
+            for(String field:List.of("pricePerKg","registrationFee"))if(row.path(field).isNumber()) {
+                row.put("sourceRaw"+field,row.path(field).asText());
+                row.put(field,row.path(field).decimalValue().round(new java.math.MathContext(15)).stripTrailingZeros());
+            }
+            if(row.path("pricePerKg").asDouble()<=0)issue(target,r+1,"pricePerKg","普货配送服务费必须大于0","error");
+            warn(row,"仅普货：不含电池/非液体化妆品；实际及申报重量均不超过2kg；单边≤60cm、长宽高之和≤90cm，尺寸须按实际包裹核对");
+            add(target,row,source,r,file);
+        }
         return true;
     }
 

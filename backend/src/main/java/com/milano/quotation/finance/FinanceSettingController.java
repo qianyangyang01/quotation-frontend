@@ -70,6 +70,7 @@ public class FinanceSettingController {
         if (key.equals("customer-operation-fees") && existing.isPresent()) CustomerOperationFees.preventLegacyOverwrite(existing.get().payload, body);
         var previous=existing.map(row->row.payload.deepCopy().toString()).orElse("");
         var before=existing.map(r->r.payload.deepCopy()).orElseGet(()->tools.jackson.databind.node.JsonNodeFactory.instance.objectNode());
+        if(key.equals("customer-grades")) body=preserveBrazilGrade(before,body);
         if(key.equals("exchange-rate")) {
             // An old open page still submits its full payload. Never accept its clock or actor metadata.
             var value=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();
@@ -83,9 +84,18 @@ public class FinanceSettingController {
         }
         var row=existing.orElse(null);if(row==null)row=FinanceSetting.create(key,body.deepCopy()); row.payload=body.deepCopy(); row.updatedAt=Instant.now(); settings.saveAndFlush(row);
         if(key.equals("exchange-rate"))ExchangeRateHistory.record(audit,before,row.payload);
-        audit.record("finance.update","finance-setting",key,"success",key.equals("womens-pricing") ? Map.of("before",previous,"after",body.toString(),"version",row.version) : Map.of()); return ApiResponse.ok(view(row));
+        audit.record("finance.update","finance-setting",key,"success",(key.equals("womens-pricing") || key.equals("customer-grades")) ? Map.of("before",previous,"after",body.toString(),"version",row.version) : Map.of()); return ApiResponse.ok(view(row));
     }
     private static void requireFobAdmin(String key){if(key.equals("fob-pricing")&&!com.milano.quotation.quote.FobCoefficientVisibility.admin())throw new org.springframework.security.access.AccessDeniedException("只有管理员可以查看或设置 FOB 系数");}
+    // Old open clients know only S-E/NEW. Their saves must retain the independently configured grade.
+    static JsonNode preserveBrazilGrade(JsonNode before,JsonNode incoming) {
+        var copy=incoming.deepCopy();var rows=copy.isArray()?copy:copy.path("grades");
+        if(rows.valueStream().anyMatch(r->r.path("grade").asText().equals("ALIEXPRESS_BR")))return copy;
+        var old=before.isArray()?before:before.path("grades");
+        for(var grade:old)if(grade.path("grade").asText().equals("ALIEXPRESS_BR"))
+            ((tools.jackson.databind.node.ArrayNode)rows).add(grade.deepCopy());
+        return copy;
+    }
     private static JsonNode defaultFob(){var n=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("_version",-1);n.set("value",com.milano.quotation.quote.FobPricing.defaults());return n;}
     private JsonNode view(FinanceSetting row){
         var wrapper=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();

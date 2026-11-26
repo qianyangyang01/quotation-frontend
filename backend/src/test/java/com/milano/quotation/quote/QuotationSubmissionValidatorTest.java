@@ -7,6 +7,16 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuotationSubmissionValidatorTest {
+    @Test void acceptsBrazilGradeWithExistingModesAndRejectsInventedGradeLabels() {
+        for(String mode:new String[]{"common","specified","template"}) {
+            var quote=valid().put("customerGrade","速卖通巴西报价").put("matrixMode",mode);
+            assertDoesNotThrow(()->validator.validate(quote));
+            var bundle=quote.deepCopy().put("quoteMode","bundle").put("primarySku","SKU-1、SKU-2");
+            addBundleItem(bundle,"SKU-1",1,.1,12,1);addBundleItem(bundle,"SKU-2",1,.2,20,0);
+            assertDoesNotThrow(()->validator.validate(bundle));
+        }
+        assertThrows(FieldValidationException.class,()->validator.validate(valid().put("customerGrade","ALIEXPRESS_BR级客户")));
+    }
     @Test void validatesCommissionAndPreservesAdjustedSnapshots() {
         var old = valid(); validator.validate(old); assertEquals(1, old.path("commissionThreshold").asInt());
         var input = valid().put("commissionThreshold", .95).put("systemQuoteUsd", 6.35).put("systemQuoteCny", 42.55).put("exchangeRate", 6.7);

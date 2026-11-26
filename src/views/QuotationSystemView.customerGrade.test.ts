@@ -19,8 +19,8 @@ vi.mock('@/data/publishedLogisticsRepository', async importOriginal => ({
 const finance = {
   'country-classification': { value: [], _version: 1 },
   'channel-policies': { value: [], _version: 1 },
-  'customer-grades': { value: ['S', 'A', 'B', 'C', 'D', 'E', 'NEW'].map(grade => ({
-    grade, coefficient: grade === 'NEW' ? 1.27635 : 1.21605, enabled: grade !== 'E',
+  'customer-grades': { value: ['S', 'A', 'B', 'C', 'D', 'E', 'NEW', 'ALIEXPRESS_BR'].map(grade => ({
+    grade, coefficient: grade === 'ALIEXPRESS_BR' ? 1.34 : grade === 'NEW' ? 1.27635 : 1.21605, enabled: grade !== 'E',
   })), _version: 8 },
   'exchange-rate': { value: { usdCny: 6.7, eurUsd: 1.16, updatedAt: 'test' }, _version: 7 },
   'tax-settings': { value: { countries: [], providers: [], updatedAt: 'test' }, _version: 1 },
@@ -46,6 +46,7 @@ describe('customer grades on a cold quotation page', () => {
   it.each([
     { draftGrade: undefined, expectedGrade: 'S' },
     { draftGrade: 'NEW', expectedGrade: 'NEW' },
+    { draftGrade: 'ALIEXPRESS_BR', expectedGrade: 'ALIEXPRESS_BR' },
     { draftGrade: 'E', expectedGrade: 'S' },
   ])('loads enabled grades before restoring $draftGrade without querying a SKU', async ({ draftGrade, expectedGrade }) => {
     let resolveFinance!: (value: typeof finance) => void
@@ -67,7 +68,7 @@ describe('customer grades on a cold quotation page', () => {
     expect(Array.from(selector().options).some(option => option.value === 'NEW')).toBe(false)
     resolveFinance(finance)
     await vi.waitFor(() => expect(host.textContent).toContain(draftGrade ? '已恢复并保存草稿' : '当前输入不会自动保存'))
-    await vi.waitFor(() => expect(Array.from(selector().options).map(option => option.value)).toEqual(['S', 'A', 'B', 'C', 'D', 'NEW', 'WOMENS']))
+    await vi.waitFor(() => expect(Array.from(selector().options).map(option => option.value)).toEqual(['S', 'A', 'B', 'C', 'D', 'NEW', 'ALIEXPRESS_BR', 'WOMENS']))
     expect(selector().value).toBe(expectedGrade)
     expect(Array.from(selector().options).find(option => option.value === 'NEW')?.textContent).toBe('新客户')
     selector().value = 'NEW'

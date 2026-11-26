@@ -1,0 +1,12 @@
+{
+  "entries": [{
+    "id": "b34e7ff1-1745-4684-b70c-c49e8614b900",
+    "providerName": "无忧物流",
+    "channelName": "无忧物流-标准-巴西小包普货",
+    "logisticsAttribute": "普货",
+    "aliases": [],
+    "productCodes": [],
+    "providerAliases": [],
+    "enabled": true
+  }]
+}

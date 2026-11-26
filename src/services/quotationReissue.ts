@@ -25,7 +25,7 @@ export function quotationReissuePayload(record: QuotationRecord): QuotationDraft
     specialPackagingGrams: record.weightSnapshot?.specialPackagingGrams ?? 0,
     quoteMode: record.quoteMode, skuSearch: isSingleQuotation(record.quoteMode) ? record.primarySku : '',
     productCategory: record.productCategory || '', logisticsAttribute: record.logisticsAttribute,
-    selectedCustomerGrade: record.customerGrade === '新客户' ? 'NEW' : record.customerGrade.replace(/级客户$/, ''),
+    selectedCustomerGrade: record.customerGrade === '速卖通巴西报价' ? 'ALIEXPRESS_BR' : record.customerGrade === '新客户' ? 'NEW' : record.customerGrade.replace(/级客户$/, ''),
     monthlySalesEstimate: record.monthlySalesEstimate || '10', customQuoteQuantity: record.customQuoteQuantity || 5,
     quoteMatrixMode: mode,
     selectedQuoteRegions,

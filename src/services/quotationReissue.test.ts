@@ -78,6 +78,7 @@ describe('reissuing a quotation as new editable inputs', () => {
     expect(payload.quoteMatrixMode).toBe(mode === 'template' ? 'template' : 'common')
     expect(payload.specifiedSelections).toEqual([])
     expect(payload.selectedCustomerGrade).toBe('NEW')
+    expect(quotationReissuePayload(record({ customerGrade: '速卖通巴西报价' })).selectedCustomerGrade).toBe('ALIEXPRESS_BR')
     expect(payload.selectedCustomerId).toBe('customer1')
     expect(payload.customQuoteQuantity).toBe(8)
     expect(payload.product.primaryChannelKey).toBe('1::物流甲::A')

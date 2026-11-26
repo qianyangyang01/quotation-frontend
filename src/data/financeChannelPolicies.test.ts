@@ -71,8 +71,8 @@ describe('customer grade settings', () => {
   it('restores all S-E rows when the persisted setting is empty', () => {
     const settings = normalizeCustomerGradeSettings([])
 
-    expect(settings.map(setting => setting.grade)).toEqual(['S', 'A', 'B', 'C', 'D', 'E', 'NEW'])
-    expect(settings.filter(setting => setting.grade !== 'NEW').every(setting => setting.enabled)).toBe(true)
+    expect(settings.map(setting => setting.grade)).toEqual(['S', 'A', 'B', 'C', 'D', 'E', 'NEW', 'ALIEXPRESS_BR'])
+    expect(settings.filter(setting => setting.grade !== 'NEW' && setting.grade !== 'ALIEXPRESS_BR').every(setting => setting.enabled)).toBe(true)
   })
 
   it('preserves configured values and fills missing grades', () => {
@@ -81,7 +81,7 @@ describe('customer grade settings', () => {
       { grade: 'C', coefficient: 1.35, enabled: true },
     ])
 
-    expect(settings).toHaveLength(7)
+    expect(settings).toHaveLength(8)
     expect(settings.find(setting => setting.grade === 'S')).toEqual({ grade: 'S', coefficient: 1.08, enabled: false })
     expect(settings.find(setting => setting.grade === 'C')).toEqual({ grade: 'C', coefficient: 1.35, enabled: true })
     expect(settings.find(setting => setting.grade === 'E')).toEqual({ grade: 'E', coefficient: 1.3, enabled: true })
@@ -106,4 +106,12 @@ describe('unavailable logistics bindings', () => {
     expect(policy.countryRules[0].allowedChannels).toEqual([])
     expect(policy.countryRules[0].unavailableChannels).toEqual([legacy])
   })
+})
+
+it('keeps the Brazil coefficient separate and displays the same name in quote selectors', () => {
+  const settings=normalizeCustomerGradeSettings([{grade:'ALIEXPRESS_BR',coefficient:1.34,enabled:true},{grade:'NEW',coefficient:1.27,enabled:true}])
+  expect(customerGradeCoefficient(settings,'ALIEXPRESS_BR')).toBe(1.34)
+  expect(customerGradeCoefficient(settings,'NEW')).toBe(1.27)
+  expect(customerGradeLabel('ALIEXPRESS_BR')).toBe('速卖通巴西报价')
+  expect(normalizeCustomerGradeSettings([]).find(row=>row.grade==='ALIEXPRESS_BR')?.enabled).toBe(false)
 })

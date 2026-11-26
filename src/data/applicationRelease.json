@@ -1,14 +1,19 @@
 {
-  "version": "quotation-2026.11.26-01-exchange-history",
+  "version": "quotation-2026.11.26-02-wuyou-brazil",
   "publishedOn": "2026-11-26",
   "policy": "optional",
   "requiredEpoch": "notice-v1",
-  "title": "汇率修改记录",
+  "title": "速卖通巴西报价与无忧物流",
   "features": [
     {
-      "title": "自动记录汇率修改",
-      "description": "保存汇率时自动记录修改前后数值、修改时间及修改人，支持按币种筛选，每页显示10条。",
-      "location": "财务设置 · 汇率设置"
+      "title": "速卖通巴西报价系数",
+      "description": "财务设置新增独立系数 1.34，同步报价客户等级，沿用普通报价计算与展示。",
+      "location": "财务设置 · 客户系数 / 业务报价"
+    },
+    {
+      "title": "无忧物流巴西小包普货",
+      "description": "新增无忧物流，限定巴西普货 1g–2kg，按原表四档配送费与挂号费计价，保留解析来源和限制说明。",
+      "location": "物流价格 / 报价渠道"
     }
   ]
 }
