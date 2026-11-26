@@ -28,7 +28,7 @@ class ExchangeRateHistoryPostgresTest {
     @Container static final PostgreSQLContainer<?> db=new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void properties(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url",db::getJdbcUrl);r.add("spring.datasource.username",db::getUsername);r.add("spring.datasource.password",db::getPassword);
-        r.add("spring.jpa.hibernate.ddl-auto",()->"validate");r.add("spring.jpa.defer-datasource-initialization",()->"false");r.add("spring.flyway.enabled",()->"true");
+        r.add("spring.jpa.hibernate.ddl-auto",()->"validate");r.add("spring.jpa.defer-datasource-initialization",()->"false");r.add("spring.flyway.enabled",()->"true");r.add("spring.sql.init.mode",()->"never");
     }
     @Autowired WebApplicationContext context; @Autowired JdbcClient jdbc; @Autowired ObjectMapper mapper;
     MockMvc mvc;
