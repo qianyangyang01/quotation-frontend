@@ -50,6 +50,17 @@ class SfDiscountImportTest {
     @Test void otherProvidersIgnoreSfSettlementAndDiscountColumns() throws Exception {
         for(var provider:LogisticsSourceParser.PROVIDERS)if(!provider.equals("顺丰")) {
             var input=workbook("折后运费",0.7,97,51);
+            if(provider.equals("无忧物流")) {
+                assertTrue(parser.parse(input,"无忧物流.xlsx").path("channels").isEmpty(),"Wuyou rejects unrelated sheets instead of generic/SF fallback");
+                try(var book=new XSSFWorkbook(new ByteArrayInputStream(new WuyouBrazilSourceTest().fixture()))) {
+                    var sheet=book.getSheetAt(0);
+                    sheet.getRow(222).getCell(3).setCellValue(97);
+                    sheet.getRow(221).createCell(23).setCellValue("折扣");sheet.getRow(222).createCell(23).setCellValue(.7);
+                    sheet.getRow(221).createCell(24).setCellValue("折后运费");sheet.getRow(222).createCell(24).setCellValue(51);
+                    assertEquals(97,channel(LogisticsSourceParserTest.bytes(book),provider).path("rows").get(0).path("pricePerKg").asDouble());
+                }
+                continue;
+            }
             if(provider.equals("帆之润"))try(var book=new org.apache.poi.hssf.usermodel.HSSFWorkbook(new ByteArrayInputStream(new FanzhirunSourceTest().fixture()))) {
                 var sheet=book.getSheetAt(0);
                 sheet.getRow(3).getCell(4).setCellValue(97);
