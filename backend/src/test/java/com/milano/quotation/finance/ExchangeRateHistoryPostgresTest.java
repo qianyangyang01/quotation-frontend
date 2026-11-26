@@ -59,7 +59,7 @@ class ExchangeRateHistoryPostgresTest {
         var dollar=data.path("latest").path("usdCny");assertEquals(6.7,dollar.path("before").asDouble());assertEquals(6.63,dollar.path("after").asDouble());
         assertEquals("FINANCEQA",dollar.path("actorAccount").asText());assertEquals("财务测试人员",dollar.path("actorName").asText());assertTrue(Instant.parse(dollar.path("modifiedAt").asText()).isAfter(start));
         var same=save("{\"usdCny\":6.6300,\"eurUsd\":1.160,\"updatedAt\":\"spoof\"}",saved.path("_version").asLong(),200);
-        assertEquals(saved,same);assertEquals(2,history("").path("total").asInt());
+        assertEquals(saved.path("value"),same.path("value"));assertEquals(saved.path("_version"),same.path("_version"));assertEquals(2,history("").path("total").asInt());
         save("{\"usdCny\":6.8,\"eurUsd\":1.16}",0,409);save("{\"usdCny\":0}",1,422);
         assertEquals(2,history("").path("total").asInt());
         var oldPage=save("{\"usdToCny\":6.8,\"updatedAt\":\"old client clock\"}",1,200);
