@@ -69,7 +69,18 @@ public class FinanceSettingController {
         if (key.equals("freight-discount-settings")) ChannelFreightDiscounts.validateBindings(jdbc,body,existing.map(row->row.payload).orElseGet(()->tools.jackson.databind.node.JsonNodeFactory.instance.objectNode()));
         if (key.equals("customer-operation-fees") && existing.isPresent()) CustomerOperationFees.preventLegacyOverwrite(existing.get().payload, body);
         var previous=existing.map(row->row.payload.deepCopy().toString()).orElse("");
-        var row=existing.orElseGet(()->FinanceSetting.create(key,body.deepCopy())); row.payload=body.deepCopy(); row.updatedAt=Instant.now(); settings.saveAndFlush(row);
+        var before=existing.map(r->r.payload.deepCopy()).orElseGet(()->tools.jackson.databind.node.JsonNodeFactory.instance.objectNode());
+        if(key.equals("exchange-rate")) {
+            // An old open page still submits its full payload. Never accept its clock or actor metadata.
+            var value=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+            value.put("usdCny",ExchangeRateHistory.rate(body,"usdCny"));
+            if(body.has("eurUsd"))value.set("eurUsd",body.path("eurUsd"));
+            else if(before.has("eurUsd"))value.set("eurUsd",before.path("eurUsd"));
+            if(existing.isPresent()&&!ExchangeRateHistory.changed(before,value,"usdCny")&&!ExchangeRateHistory.changed(before,value,"eurUsd"))return ApiResponse.ok(view(existing.get()));
+            value.put("updatedAt",Instant.now().toString());body=value;
+        }
+        var row=existing.orElse(null);if(row==null)row=FinanceSetting.create(key,body.deepCopy()); row.payload=body.deepCopy(); row.updatedAt=Instant.now(); settings.saveAndFlush(row);
+        if(key.equals("exchange-rate"))ExchangeRateHistory.record(audit,before,row.payload);
         audit.record("finance.update","finance-setting",key,"success",key.equals("womens-pricing") ? Map.of("before",previous,"after",body.toString(),"version",row.version) : Map.of()); return ApiResponse.ok(view(row));
     }
     private static void requireFobAdmin(String key){if(key.equals("fob-pricing")&&!com.milano.quotation.quote.FobCoefficientVisibility.admin())throw new org.springframework.security.access.AccessDeniedException("只有管理员可以查看或设置 FOB 系数");}

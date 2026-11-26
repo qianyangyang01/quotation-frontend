@@ -318,14 +318,13 @@ export async function saveFinanceExchangeRate(usdCny: number): Promise<FinanceEx
   const setting = {
     ...loadFinanceExchangeRate(),
     usdCny: Math.max(0.0001, Number(usdCny) || DEFAULT_USD_CNY_RATE),
-    updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
   }
   return writeFinanceSetting('exchange-rate', setting)
 }
 
 export async function saveFinanceEurUsdRate(eurUsd: number): Promise<FinanceExchangeRateSetting> {
   if (!Number.isFinite(eurUsd) || eurUsd <= 0) throw new Error('欧元兑美元汇率必须大于 0')
-  const setting = { ...loadFinanceExchangeRate(), eurUsd, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) }
+  const setting = { ...loadFinanceExchangeRate(), eurUsd }
   return writeFinanceSetting('exchange-rate', setting)
 }
 

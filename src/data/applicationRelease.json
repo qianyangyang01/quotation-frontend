@@ -1,19 +1,14 @@
 {
-  "version": "quotation-2026.11.25-02-copy-photos",
-  "publishedOn": "2026-11-25",
+  "version": "quotation-2026.11.26-01-exchange-history",
+  "publishedOn": "2026-11-26",
   "policy": "optional",
   "requiredEpoch": "notice-v1",
-  "title": "图文复制与国家标签修复",
+  "title": "汇率修改记录",
   "features": [
     {
-      "title": "多张商品图完整复制",
-      "description": "复制图文表格时将商品图片按原顺序拼合，避免粘贴到表格后只保留第一张；文字和价格仍可编辑。",
-      "location": "报价单 · 复制图文表格"
-    },
-    {
-      "title": "国家下方去掉带电标签",
-      "description": "国家下方不再显示 With Battery，实际物流属性、计费和历史报价保持不变。",
-      "location": "报价单 · 国家"
+      "title": "自动记录汇率修改",
+      "description": "保存汇率时自动记录修改前后数值、修改时间及修改人，支持按币种筛选，每页显示10条。",
+      "location": "财务设置 · 汇率设置"
     }
   ]
 }
