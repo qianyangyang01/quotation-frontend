@@ -87,6 +87,15 @@ public class FinanceSettingController {
     }
     private static void requireFobAdmin(String key){if(key.equals("fob-pricing")&&!com.milano.quotation.quote.FobCoefficientVisibility.admin())throw new org.springframework.security.access.AccessDeniedException("只有管理员可以查看或设置 FOB 系数");}
     private static JsonNode defaultFob(){var n=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("_version",-1);n.set("value",com.milano.quotation.quote.FobPricing.defaults());return n;}
-    private JsonNode view(FinanceSetting row){var wrapper=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();wrapper.set("value",row.payload.deepCopy());wrapper.put("_version",row.version);wrapper.put("_updatedAt",row.updatedAt.toString());return wrapper;}
+    private JsonNode view(FinanceSetting row){
+        var wrapper=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        JsonNode value=row.payload.deepCopy();
+        if(row.key.equals("exchange-rate") && value instanceof ObjectNode object) {
+            // Keep both read contracts available to old open clients without mutating stored data.
+            var rate=object.path(object.has("usdCny")?"usdCny":"usdToCny");
+            if(rate.isNumber()){object.set("usdCny",rate);object.set("usdToCny",rate);}
+        }
+        wrapper.set("value",value);wrapper.put("_version",row.version);wrapper.put("_updatedAt",row.updatedAt.toString());return wrapper;
+    }
     private static void validateKey(String key){if(!KEYS.contains(key)) throw AppException.notFound("财务设置不存在");}
 }

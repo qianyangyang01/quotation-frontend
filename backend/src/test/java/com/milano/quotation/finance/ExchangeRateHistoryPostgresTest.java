@@ -63,6 +63,7 @@ class ExchangeRateHistoryPostgresTest {
         save("{\"usdCny\":6.8,\"eurUsd\":1.16}",0,409);save("{\"usdCny\":0}",1,422);
         assertEquals(2,history("").path("total").asInt());
         var oldPage=save("{\"usdToCny\":6.8,\"updatedAt\":\"old client clock\"}",1,200);
+        assertEquals(6.8,oldPage.path("value").path("usdToCny").asDouble());assertEquals(6.8,oldPage.path("value").path("usdCny").asDouble());
         assertEquals(1.16,oldPage.path("value").path("eurUsd").asDouble());assertEquals(3,history("").path("total").asInt());
     }
     @Test void paginatesAndFiltersAndBoundsPageWithoutLosingOtherCurrencyLatest() throws Exception {
