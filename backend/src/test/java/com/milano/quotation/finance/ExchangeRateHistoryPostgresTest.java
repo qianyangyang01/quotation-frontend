@@ -1,6 +1,8 @@
 package com.milano.quotation.finance;
 
-import com.milano.quotation.security.QuotationPrincipal;
+import com.milano.quotation.security.*;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,20 +33,22 @@ class ExchangeRateHistoryPostgresTest {
         r.add("spring.jpa.hibernate.ddl-auto",()->"validate");r.add("spring.jpa.defer-datasource-initialization",()->"false");r.add("spring.flyway.enabled",()->"true");r.add("spring.sql.init.mode",()->"never");
     }
     @Autowired WebApplicationContext context; @Autowired JdbcClient jdbc; @Autowired ObjectMapper mapper;
-    MockMvc mvc;
-    QuotationPrincipal finance=new QuotationPrincipal(UUID.randomUUID(),"FINANCEQA","财务测试人员","","finance",true,false,List.of("finance"));
-    @BeforeEach void setup() {
+    MockMvc mvc; MockHttpSession financeSession;
+    @Autowired UserAccountRepository users; @Autowired PasswordEncoder encoder;
+    @BeforeEach void setup() throws Exception {
         mvc=webAppContextSetup(context).apply(springSecurity()).build();
+        if(!users.existsByAccountIgnoreCase("FINANCEQA"))users.saveAndFlush(UserAccount.create("FINANCEQA","财务测试人员",encoder.encode("ExchangeTest123"),"finance",false));
+        financeSession=(MockHttpSession)mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json").content("{\"account\":\"FINANCEQA\",\"password\":\"ExchangeTest123\"}")).andExpect(status().isOk()).andReturn().getRequest().getSession(false);
         jdbc.sql("delete from audit_log where resource_type='finance-setting' and resource_id='exchange-rate'").update();
         jdbc.sql("insert into finance_setting(setting_key,payload,version,updated_at) values('exchange-rate','{\"usdCny\":6.7,\"eurUsd\":1.15,\"updatedAt\":\"old\"}',0,now()) on conflict(setting_key) do update set payload=excluded.payload,version=0,updated_at=excluded.updated_at").update();
     }
     JsonNode save(String body,long version,int status) throws Exception {
-        var response=mvc.perform(put("/api/v1/finance-settings/exchange-rate").with(user(finance)).with(csrf()).header("If-Match",version).contentType("application/json").content(body))
+        var response=mvc.perform(put("/api/v1/finance-settings/exchange-rate").session(financeSession).with(csrf()).header("If-Match",version).contentType("application/json").content(body))
             .andExpect(status().is(status)).andReturn().getResponse().getContentAsString();
         return mapper.readTree(response).path("data");
     }
     JsonNode history(String query) throws Exception {
-        return mapper.readTree(mvc.perform(get("/api/v1/finance-settings/exchange-rate/history"+query).with(user(finance))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        return mapper.readTree(mvc.perform(get("/api/v1/finance-settings/exchange-rate/history"+query).session(financeSession)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
     }
     @Test void serverOwnsIdentityClockAndAtomicBeforeAfterAndIgnoresUnchangedSaves() throws Exception {
         var start=Instant.now().minusSeconds(1);
@@ -66,7 +70,7 @@ class ExchangeRateHistoryPostgresTest {
         var first=history("?page=0");var second=history("?page=1");assertEquals(13,first.path("total").asInt());assertEquals(10,first.path("items").size());assertEquals(3,second.path("items").size());
         var ids=new HashSet<String>();for(var item:first.path("items"))assertTrue(ids.add(item.path("id").asText()));for(var item:second.path("items"))assertTrue(ids.add(item.path("id").asText()));
         var euro=history("?currency=eurUsd&page=99");assertEquals(1,euro.path("total").asInt());assertEquals(0,euro.path("page").asInt());assertEquals(2,euro.path("latest").size());
-        mvc.perform(get("/api/v1/finance-settings/exchange-rate/history?currency=bad").with(user(finance))).andExpect(status().isUnprocessableEntity());
+        mvc.perform(get("/api/v1/finance-settings/exchange-rate/history?currency=bad").session(financeSession)).andExpect(status().isUnprocessableEntity());
     }
     @Test void unauthorizedReadersAndWritersCannotAccessHistory() throws Exception {
         mvc.perform(get("/api/v1/finance-settings/exchange-rate/history").with(user("EMPLOYEE").authorities(()->"PERM_quotation"))).andExpect(status().isForbidden());
@@ -85,7 +89,7 @@ class ExchangeRateHistoryPostgresTest {
         var gate=new CountDownLatch(1);
         try(var pool=Executors.newFixedThreadPool(2)) {
             var tasks=new ArrayList<Future<Integer>>();
-            for(int n=0;n<2;n++){final int value=7+n;tasks.add(pool.submit(()->{gate.await();return mvc.perform(put("/api/v1/finance-settings/exchange-rate").with(user(finance)).with(csrf()).header("If-Match",0).contentType("application/json").content("{\"usdCny\":"+value+"}")).andReturn().getResponse().getStatus();}));}
+            for(int n=0;n<2;n++){final int value=7+n;tasks.add(pool.submit(()->{gate.await();return mvc.perform(put("/api/v1/finance-settings/exchange-rate").session(financeSession).with(csrf()).header("If-Match",0).contentType("application/json").content("{\"usdCny\":"+value+"}")).andReturn().getResponse().getStatus();}));}
             gate.countDown();var statuses=new ArrayList<Integer>();for(var task:tasks)statuses.add(task.get(20,TimeUnit.SECONDS));Collections.sort(statuses);assertEquals(List.of(200,409),statuses);
         }
         assertEquals(1,history("").path("total").asInt());
