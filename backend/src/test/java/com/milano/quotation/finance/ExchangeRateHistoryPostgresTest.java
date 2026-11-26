@@ -53,6 +53,7 @@ class ExchangeRateHistoryPostgresTest {
     @Test void serverOwnsIdentityClockAndAtomicBeforeAfterAndIgnoresUnchangedSaves() throws Exception {
         var start=Instant.now().minusSeconds(1);
         var saved=save("{\"usdCny\":6.63,\"eurUsd\":1.16,\"updatedAt\":\"forged\",\"actorName\":\"forged\"}",0,200);
+        assertEquals(saved.path("_version").asLong(),jdbc.sql("select version from finance_setting where setting_key='exchange-rate'").query(Long.class).single());
         assertFalse(saved.path("value").has("actorName"));assertTrue(Instant.parse(saved.path("value").path("updatedAt").asText()).isAfter(start));
         var data=history("");assertEquals(2,data.path("total").asInt());assertEquals(2,data.path("latest").size());
         var dollar=data.path("latest").path("usdCny");assertEquals(6.7,dollar.path("before").asDouble());assertEquals(6.63,dollar.path("after").asDouble());

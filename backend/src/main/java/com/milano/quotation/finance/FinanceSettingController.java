@@ -73,7 +73,9 @@ public class FinanceSettingController {
         if(key.equals("exchange-rate")) {
             // An old open page still submits its full payload. Never accept its clock or actor metadata.
             var value=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();
-            value.put("usdCny",ExchangeRateHistory.rate(body,"usdCny"));
+            // Preserve Jackson's incoming numeric node type so Hibernate's JSON snapshot
+            // remains equal after flush; a DecimalNode here can cause a second version bump.
+            value.set("usdCny",body.path(body.has("usdCny")?"usdCny":"usdToCny"));
             if(body.has("eurUsd"))value.set("eurUsd",body.path("eurUsd"));
             else if(before.has("eurUsd"))value.set("eurUsd",before.path("eurUsd"));
             if(existing.isPresent()&&!ExchangeRateHistory.changed(before,value,"usdCny")&&!ExchangeRateHistory.changed(before,value,"eurUsd"))return ApiResponse.ok(view(existing.get()));
